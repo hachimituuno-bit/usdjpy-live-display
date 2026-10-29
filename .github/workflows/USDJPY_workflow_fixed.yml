@@ -4,13 +4,19 @@ name: NEW USDJPY live display (No Google Cloud)
 on:
   workflow_dispatch:
   
+  
   schedule:
-    - cron: '7,22,37,52 * * * 1-5'
-      timezone: 'Asia/Tokyo'
-    - cron: '7,22,37,52 0-6 * * 6'
-      timezone: 'Asia/Tokyo'
-    - cron: '7,22,37,52 7-23 * * 0'
-      timezone: 'Asia/Tokyo'
+    # JST Mon-Fri 00:00-23:59
+    - cron: '7,22,37,52 15-23 * * 0-4'
+    - cron: '7,22,37,52 0-14 * * 1-5'
+
+    # JST Saturday 00:00-06:59
+    - cron: '7,22,37,52 15-21 * * 5'
+
+    # JST Sunday 07:00-23:59
+    - cron: '7,22,37,52 22-23 * * 6'
+    - cron: '7,22,37,52 0-14 * * 0'
+
 
 permissions:
   contents: write
