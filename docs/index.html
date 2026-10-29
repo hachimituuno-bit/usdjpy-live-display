@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:system-ui,"Noto Sans JP",sans-serif;color:#333;margin:0;padding:10px;font-size:17px;line-height:1.6}h2{font-size:24px}#scores{font-size:21px;font-weight:bold}.muted{color:#666;font-size:14px}.box{padding:8px 0;border-bottom:1px solid #ddd}</style></head><body>
+<div id="app" aria-live="polite">USD/JPY分析データを読み込み中…</div>
+<script>
+const e=s=>String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const d=n=>Number.isFinite(Number(n))?Number(n).toFixed(4):'—';
+async function load(){try{
+const r=await fetch('./latest.json?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);
+const v=await r.json();const tf=v.timeframes||{};
+const gen=v.generated_at_jst||v.asof||'不明';
+let html='<p class="muted">最終データ生成：'+e(gen)+'</p><h2>USD/JPY（ドル円）：4時間足ルールによる評価</h2>';
+html+='<p id="scores">買いスコア '+e(v.buy)+'% ／ 売りスコア '+e(v.sell)+'%</p>';
+for(const label of ['日足','4時間足','1時間足','15分足']){
+const a=tf[label];if(!a)continue;
+html+='<div class="box"><strong>'+label+'（'+e(a.weight)+'点）：'+e(a.direction)+'</strong> ／ MA7='+d(a.ma7)+'、MA28='+d(a.ma28);
+if(label==='15分足')html+=' ／ MACD='+d(a.macd)+'、シグナル='+d(a.macd_signal)+'、RSI(14)='+d(a.rsi)+' ／ 票数 買い'+e(a.buy_votes)+'・売り'+e(a.sell_votes);
+html+='</div>';}
+html+='<p class="muted">取得元：'+e(v.source||'Yahoo Finance')+'。この％は予測確率ではなく、ルールに基づく方向スコアです。表示データは15分ごとの実行を目標に更新されますが、GitHub Actionsの実行が遅れる場合があります。</p>';
+document.getElementById('app').innerHTML=html;
+}catch(err){document.getElementById('app').textContent='分析データを取得できませんでした：'+err.message;}}
+load();setInterval(load,60*1000);
+</script></body></html>
