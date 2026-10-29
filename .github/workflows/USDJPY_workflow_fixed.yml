@@ -5,17 +5,16 @@ on:
   workflow_dispatch:
   
   
+  
   schedule:
-    # JST Mon-Fri 00:00-23:59
-    - cron: '7,22,37,52 15-23 * * 0-4'
-    - cron: '7,22,37,52 0-14 * * 1-5'
+    # UTC Sunday to Thursday: all day
+    - cron: '7,22,37,52 * * * 0-4'
 
-    # JST Saturday 00:00-06:59
-    - cron: '7,22,37,52 15-21 * * 5'
+    # UTC Friday: 00:00 to 21:59
+    - cron: '7,22,37,52 0-21 * * 5'
 
-    # JST Sunday 07:00-23:59
+    # UTC Saturday: 22:00 to 23:59
     - cron: '7,22,37,52 22-23 * * 6'
-    - cron: '7,22,37,52 0-14 * * 0'
 
 
 permissions:
