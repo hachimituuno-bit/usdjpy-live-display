@@ -1,4 +1,5 @@
 
+# Resync scheduled workflow
 name: NEW USDJPY live display (No Google Cloud)
 
 on:
