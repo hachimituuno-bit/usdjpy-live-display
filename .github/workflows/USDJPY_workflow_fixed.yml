@@ -1,29 +1,48 @@
+
 name: NEW USDJPY live display (No Google Cloud)
+
 on:
   workflow_dispatch:
   schedule:
-    - cron: '3,18,33,48 * * * *'
+    # Monday-Friday: every 15 minutes
+    - cron: '3,18,33,48 * * * 1-5'
       timezone: 'Asia/Tokyo'
+
+    # Saturday: midnight to 06:59
+    - cron: '3,18,33,48 0-6 * * 6'
+      timezone: 'Asia/Tokyo'
+
+    # Sunday: 07:00 to 23:59
+    - cron: '3,18,33,48 7-23 * * 0'
+      timezone: 'Asia/Tokyo'
+
 permissions:
   contents: write
+
 concurrency:
   group: usdjpy-live-data
   cancel-in-progress: false
+
 jobs:
   update-data:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: true
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
+
       - run: pip install -r requirements.txt
+
       - name: Generate fresh USDJPY data
         run: python fx_generate.py
+
       - name: Commit updated data when changed
         run: |
           git config user.name 'github-actions[bot]'
