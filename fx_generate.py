@@ -76,7 +76,7 @@ def should_run(now):
 def main():
     now = datetime.now(JST)
     if not should_run(now):
-        print('Scheduled pause: Saturday 07:00 to Sunday 06:59 JST')
+        print('Scheduled pause: Saturday 07:00 to Monday 06:59 JST')
         return
     result = calculate_fx_four_timeframes()  # raises on missing/ambiguous data
     if result['buy'] + result['sell'] != 100:
