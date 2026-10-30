@@ -1,0 +1,34 @@
+name: NEW Blogger Mail2Blogger post (manual test)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'true: プレビューのみ / false: 新しい記事を1件メール投稿'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  send-new-post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout NEW repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Preview or email NEW Blogger post
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          BLOGGER_POST_EMAIL: ${{ secrets.BLOGGER_POST_EMAIL }}
+        run: python mail_to_blogger.py
