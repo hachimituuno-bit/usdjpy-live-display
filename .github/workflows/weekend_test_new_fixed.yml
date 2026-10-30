@@ -1,0 +1,181 @@
+name: NEW weekend analysis TEST (temporary)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Choose fx, stocks, both, or a one-off email test'
+        type: choice
+        options:
+          - both
+          - fx
+          - stocks
+          - mail
+        default: both
+        required: true
+      dry_run:
+        description: 'Mail test only: true=preview, false=send ONE email'
+        type: boolean
+        default: true
+        required: true
+  schedule:
+    # GitHub cron is UTC, +9 hours = Japan time.
+    # Sat/Sun 07:07-08:52 JST, every 15 min.
+    - cron: '7,22,37,52 22-23 * * 5,6'
+    # Sat/Sun 09:07-23:52 JST, every 15 min.
+    - cron: '7,22,37,52 0-14 * * 6,0'
+    # Sun/Mon 00:07-06:07 JST, hourly.
+    - cron: '7 15-21 * * 6,0'
+    # One stock-data refresh on Sat and Sun, 16:30 JST (07:30 UTC).
+    - cron: '30 7 * * 6,0'
+
+permissions:
+  contents: write
+
+jobs:
+  fx-weekend:
+    if: >-
+      ${{
+      (github.event_name == 'workflow_dispatch' && (inputs.target == 'fx' || inputs.target == 'both')) ||
+      (github.event_name == 'schedule' && github.event.schedule != '30 7 * * 6,0')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    concurrency:
+      group: usdjpy-live-data
+      cancel-in-progress: false
+    env:
+      WEEKEND_TEST_MODE: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Verify JST weekend window for scheduled run
+        id: gate
+        shell: bash
+        run: |
+          python - <<'PY'
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          import os
+          now = datetime.now(ZoneInfo('Asia/Tokyo'))
+          w, h = now.weekday(), now.hour
+          in_test = (w == 5 and h >= 7) or w == 6 or (w == 0 and h < 7)
+          enabled = os.environ.get('GITHUB_EVENT_NAME') != 'schedule' or in_test
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write(f"allowed={str(enabled).lower()}\n")
+          print('JST', now.isoformat(timespec='seconds'), 'fx allowed:', enabled)
+          PY
+      - name: Generate FX data (weekend test)
+        if: steps.gate.outputs.allowed == 'true'
+        run: python fx_generate.py
+      - name: Commit fresh FX JSON
+        if: steps.gate.outputs.allowed == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f docs/latest.json
+          if git diff --cached --quiet; then
+            echo 'FX JSON unchanged; nothing to commit.'
+            exit 0
+          fi
+          git commit -m 'Test weekend USDJPY data update'
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git rebase origin/main
+            if git push origin HEAD:main; then
+              echo "JSON saved to GitHub (attempt ${attempt})."
+              exit 0
+            fi
+            echo "Concurrent update detected; retry ${attempt}/5..."
+            sleep 3
+          done
+          echo 'ERROR: JSON push failed after five attempts.' >&2
+          exit 1
+
+  stocks-weekend:
+    if: >-
+      ${{
+      (github.event_name == 'workflow_dispatch' && (inputs.target == 'stocks' || inputs.target == 'both')) ||
+      (github.event_name == 'schedule' && github.event.schedule == '30 7 * * 6,0')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    concurrency:
+      group: usdjpy-stocks-daily
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Verify JST weekend window for scheduled run
+        id: gate
+        shell: bash
+        run: |
+          python - <<'PY'
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          import os
+          now = datetime.now(ZoneInfo('Asia/Tokyo'))
+          in_test = now.weekday() in (5, 6)
+          enabled = os.environ.get('GITHUB_EVENT_NAME') != 'schedule' or in_test
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write(f"allowed={str(enabled).lower()}\n")
+          print('JST', now.isoformat(timespec='seconds'), 'stocks allowed:', enabled)
+          PY
+      - name: Generate stock data (latest available trading day)
+        if: steps.gate.outputs.allowed == 'true'
+        run: python stocks_generate.py
+      - name: Commit fresh stocks JSON
+        if: steps.gate.outputs.allowed == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f docs/stocks_latest.json
+          if git diff --cached --quiet; then
+            echo 'Stock JSON unchanged; nothing to commit.'
+            exit 0
+          fi
+          git commit -m 'Test weekend Japan stocks data update'
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git rebase origin/main
+            if git push origin HEAD:main; then
+              echo "JSON saved to GitHub (attempt ${attempt})."
+              exit 0
+            fi
+            echo "Concurrent update detected; retry ${attempt}/5..."
+            sleep 3
+          done
+          echo 'ERROR: JSON push failed after five attempts.' >&2
+          exit 1
+
+  mail-test:
+    if: >-
+      ${{github.event_name == 'workflow_dispatch' && inputs.target == 'mail'}}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Preview or send ONE test mail (never scheduled)
+        env:
+          DRY_RUN: ${{inputs.dry_run && 'true' || 'false'}}
+          SMTP_HOST: ${{secrets.SMTP_HOST}}
+          SMTP_PORT: ${{secrets.SMTP_PORT}}
+          SMTP_USERNAME: ${{secrets.SMTP_USERNAME}}
+          SMTP_PASSWORD: ${{secrets.SMTP_PASSWORD}}
+          BLOGGER_POST_EMAIL: ${{secrets.BLOGGER_POST_EMAIL}}
+        run: python mail_to_blogger.py
