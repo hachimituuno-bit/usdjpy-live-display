@@ -136,7 +136,19 @@ jobs:
             exit 0
           fi
           git commit -m 'Test weekend Japan stocks data update'
-          git push
+          
+for attempt in 1 2 3 4 5; do
+  git fetch origin main
+  git rebase origin/main
+  if git push origin HEAD:main; then
+    echo "保存成功"
+    exit 0
+  fi
+  echo "競合したため再試行 ${attempt}/5"
+  sleep 3
+done
+exit 1
+
 
   mail-test:
     if: >-
