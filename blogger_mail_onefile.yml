@@ -1,0 +1,107 @@
+
+name: NEW Blogger email post (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'true = preview, false = send a NEW post'
+        type: boolean
+        default: true
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout this NEW repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compose and send via Mail2Blogger
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          BLOGGER_POST_EMAIL: ${{ secrets.BLOGGER_POST_EMAIL }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import smtplib
+          import ssl
+          from datetime import datetime, timedelta, timezone
+          from email.message import EmailMessage
+          from pathlib import Path
+
+          jst = timezone(timedelta(hours=9))
+          now = datetime.now(jst).strftime('%Y-%m-%d %H:%M JST')
+          fx = json.loads(Path('docs/latest.json').read_text(encoding='utf-8'))
+          stocks = json.loads(Path('docs/stocks_latest.json').read_text(encoding='utf-8'))
+
+          buy, sell = int(fx['buy']), int(fx['sell'])
+          assert 0 <= buy <= 100 and 0 <= sell <= 100 and buy + sell == 100
+          top3 = stocks['stocks']
+          assert isinstance(top3, list) and len(top3) == 3
+          subject = f'【新方式・{now}】USD/JPY・日本株3銘柄の分析'
+          lines = [
+              '【新方式】為替・日本株 分析速報',
+              f'投稿時刻：{now}',
+              '',
+              '■ USD/JPY テクニカル分析',
+              f'買い：{buy}/100、売り：{sell}/100',
+              f"データ更新：{fx['generated_at_jst']}",
+          ]
+          for period in ('日足', '4時間足', '1時間足', '15分足'):
+              frame = fx['timeframes'][period]
+              lines.append(f"・{period}：{frame['direction']}（配点{frame['weight']}）")
+          lines += ['', '■ 日本株 買いスコア上位3銘柄',
+                    f"データ更新：{stocks['generated_at_jst']}"]
+          for rank, item in enumerate(top3, 1):
+              lines.append(f"{rank}位 {item['name']} ({item['symbol']})："
+                           f"買い{item['score_buy']}/100、終値{item['close']}円、{item['date']}")
+          lines += [
+              '', '■ 最新の分析ダッシュボード',
+              'https://hachimituuno-bit.github.io/usdjpy-live-display/dashboard.html',
+              '',
+              '※スコアは予測確率ではありません。',
+              '※日本株は固定20銘柄から選んだ上位3銘柄です。',
+              '※休日や市場休場時は直近のデータが表示されます。',
+              '', '#end',
+          ]
+          body = '\n'.join(lines)
+
+          if os.getenv('DRY_RUN', 'true').lower() != 'false':
+              print('プレビューのみ：メールは送信していません。')
+              print('件名：', subject)
+              print(body)
+          else:
+              username = os.getenv('SMTP_USERNAME', '').strip()
+              password = os.getenv('SMTP_PASSWORD', '')
+              recipient = os.getenv('BLOGGER_POST_EMAIL', '').strip()
+              if not username or not password or not recipient:
+                  raise RuntimeError('GitHub Secrets 3項目が不足しています。')
+              if any(c in username + recipient for c in ('\r', '\n', ' ')):
+                  raise RuntimeError('メールアドレスの書式が不正です。')
+              if not recipient.lower().endswith('@blogger.com'):
+                  raise RuntimeError('Blogger投稿専用メールアドレスが必要です。')
+              msg = EmailMessage()
+              msg['From'] = username
+              msg['To'] = recipient
+              msg['Subject'] = subject
+              msg.set_content(body, charset='utf-8')
+              try:
+                  with smtplib.SMTP_SSL('smtp.gmail.com', 465,
+                                        context=ssl.create_default_context(), timeout=30) as smtp:
+                      smtp.login(username, password)
+                      smtp.send_message(msg)
+              except (smtplib.SMTPException, OSError) as exc:
+                  raise RuntimeError(f'SMTP送信失敗（{type(exc).__name__}）') from None
+              print('SMTPへの送信成功。Bloggerの公開状況は別途確認してください。')
+          PY
