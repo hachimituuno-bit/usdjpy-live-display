@@ -64,8 +64,13 @@ def should_run(now):
     if os.getenv('WEEKEND_TEST_MODE', '').strip().lower() == 'true':
         return True
     # Preserve the original production weekend guard for the normal workflow.
-    return not ((now.weekday() == 5 and now.hour >= 7) or
-                (now.weekday() == 6 and now.hour < 7))
+    
+    return not (
+        (now.weekday() == 5 and now.hour >= 7)
+        or now.weekday() == 6
+        or (now.weekday() == 0 and now.hour < 7)
+    )
+
 
 
 def main():
