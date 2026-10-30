@@ -60,7 +60,10 @@ def calculate_fx_four_timeframes():
 
 
 def should_run(now):
-    # Saturday 07:00 JST to Sunday 06:59 JST: paused; all other periods active.
+    # Temporary weekend-test workflows can explicitly bypass the normal market pause.
+    if os.getenv('WEEKEND_TEST_MODE', '').strip().lower() == 'true':
+        return True
+    # Preserve the original production weekend guard for the normal workflow.
     return not ((now.weekday() == 5 and now.hour >= 7) or
                 (now.weekday() == 6 and now.hour < 7))
 
