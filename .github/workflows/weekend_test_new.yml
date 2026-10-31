@@ -1,4 +1,4 @@
-name: NEW weekend analysis TEST (temporary)
+name: NEW weekend analysis TEST (2026-10-31 to 11-02 only)
 
 on:
   workflow_dispatch:
@@ -19,15 +19,22 @@ on:
         default: true
         required: true
   schedule:
-    # GitHub cron is UTC, +9 hours = Japan time.
-    # Sat/Sun 07:02-08:57 JST: check every 5 minutes; generate only after 15 minutes.
-    - cron: '2-59/5 22-23 * * 5,6'
-    # Sat/Sun 09:02-23:57 JST: check every 5 minutes.
-    - cron: '2-59/5 0-14 * * 6,0'
-    # Sun/Mon 00:07-06:07 JST, hourly.
-    - cron: '7 15-21 * * 6,0'
-    # One stock-data refresh on Sat and Sun, 16:30 JST (07:30 UTC).
-    - cron: '30 7 * * 6,0'
+    # ONE-TIME WEEKEND TEST: 2026-10-31 07:00 to 2026-11-02 07:00 JST.
+    # GitHub cron uses UTC. Month/day restrictions prevent weekly runs later.
+    # The time gates below also verify the YEAR and stop at Nov 2, 07:00 JST.
+    # Sat 2026-10-31 and Sun 2026-11-01, JST 07:02-08:57 (UTC day before).
+    - cron: '2-59/5 22-23 30,31 10 *'
+    # Sat 2026-10-31, JST 09:02-23:57.
+    - cron: '2-59/5 0-14 31 10 *'
+    # Sun 2026-11-01, JST 09:02-23:57.
+    - cron: '2-59/5 0-14 1 11 *'
+    # Sun 2026-11-01, JST 00:07-06:07.
+    - cron: '7 15-21 31 10 *'
+    # Mon 2026-11-02, JST 00:07-06:07.
+    - cron: '7 15-21 1 11 *'
+    # Stock-data test at 16:30 JST on Sat and Sun ONLY.
+    - cron: '30 7 31 10 *'
+    - cron: '30 7 1 11 *'
 
 permissions:
   contents: write
@@ -37,7 +44,7 @@ jobs:
     if: >-
       ${{
       (github.event_name == 'workflow_dispatch' && (inputs.target == 'fx' || inputs.target == 'both')) ||
-      (github.event_name == 'schedule' && github.event.schedule != '30 7 * * 6,0')
+      (github.event_name == 'schedule' && github.event.schedule != '30 7 31 10 *' && github.event.schedule != '30 7 1 11 *')
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -64,9 +71,17 @@ jobs:
           now = datetime.now(ZoneInfo('Asia/Tokyo'))
           w, h = now.weekday(), now.hour
           weekend_window = (w == 5 and h >= 7) or w == 6 or (w == 0 and h < 7)
+          test_start = datetime(2026, 10, 31, 7, 0, tzinfo=ZoneInfo('Asia/Tokyo'))
+          test_end = datetime(2026, 11, 2, 7, 0, tzinfo=ZoneInfo('Asia/Tokyo'))
+          test_dates = test_start <= now < test_end
           manual = os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
-          allowed = manual or weekend_window
-          reason = 'manual test' if manual else 'outside weekend test window'
+          allowed = manual or (weekend_window and test_dates)
+          if manual:
+              reason = 'explicit manual test'
+          elif not test_dates:
+              reason = 'one-time weekend test ended (2026-11-02 07:00 JST)'
+          else:
+              reason = 'outside weekend test window'
 
           if allowed and not manual:
               path = Path('docs/latest.json')
@@ -131,7 +146,7 @@ jobs:
     if: >-
       ${{
       (github.event_name == 'workflow_dispatch' && (inputs.target == 'stocks' || inputs.target == 'both')) ||
-      (github.event_name == 'schedule' && github.event.schedule == '30 7 * * 6,0')
+      (github.event_name == 'schedule' && (github.event.schedule == '30 7 31 10 *' || github.event.schedule == '30 7 1 11 *'))
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 18
@@ -155,8 +170,11 @@ jobs:
           from datetime import datetime
           from zoneinfo import ZoneInfo
           import os
-          now = datetime.now(ZoneInfo('Asia/Tokyo'))
-          in_test = now.weekday() in (5, 6)
+          jst = ZoneInfo('Asia/Tokyo')
+          now = datetime.now(jst)
+          start = datetime(2026, 10, 31, 7, 0, tzinfo=jst)
+          end = datetime(2026, 11, 2, 7, 0, tzinfo=jst)
+          in_test = start <= now < end and now.weekday() in (5, 6)
           enabled = os.environ.get('GITHUB_EVENT_NAME') != 'schedule' or in_test
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
               f.write(f"allowed={str(enabled).lower()}\n")
