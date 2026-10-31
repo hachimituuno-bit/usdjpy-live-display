@@ -1,5 +1,5 @@
 {
-  "generated_at_jst": "2026-10-31T12:57:36+09:00",
+  "generated_at_jst": "2026-10-31T17:11:25+09:00",
   "universe": "固定候補20銘柄から買いスコア上位3銘柄を抽出（東証全銘柄ではありません）",
   "method": "MA5>MA20:40点、MACD(12,26,9)>Signal:35点、RSI14>50:25点。確率ではありません。",
   "data_source": "Yahoo Finance via yfinance; データは遅延することがあります。",
