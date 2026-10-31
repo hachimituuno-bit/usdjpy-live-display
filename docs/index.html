@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>body{font-family:system-ui,"Noto Sans JP",sans-serif;color:#333;margin:0;padding:10px;font-size:17px;line-height:1.6}h2{font-size:24px}#scores{font-size:21px;font-weight:bold}.muted{color:#666;font-size:14px}.box{padding:8px 0;border-bottom:1px solid #ddd}</style></head><body>
+<style>body{font-family:system-ui,"Noto Sans JP",sans-serif;color:#333;margin:0;padding:10px;font-size:17px;line-height:1.6}h2{font-size:24px}#scores{font-size:21px;font-weight:bold}.muted{color:#666;font-size:14px}.box{padding:8px 0;border-bottom:1px solid #ddd}.update-meta{margin:7px 0 18px;line-height:1.4}.update-label{display:block;color:#555;font-size:16px;font-weight:600}.update-time{display:block;color:#162b50;font-size:clamp(22px,3vw,28px);font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:.3px;overflow-wrap:anywhere}</style></head><body>
 <div id="app" aria-live="polite">USD/JPY分析データを読み込み中…</div>
 <script>
 const e=s=>String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -8,8 +8,8 @@ const d=n=>Number.isFinite(Number(n))?Number(n).toFixed(4):'—';
 async function load(){try{
 const r=await fetch('./latest.json?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);
 const v=await r.json();const tf=v.timeframes||{};
-const gen=v.generated_at_jst||v.asof||'不明';
-let html='<p class="muted">最終データ生成：'+e(gen)+'</p><h2>USD/JPY（ドル円）：4時間足ルールによる評価</h2>';
+const gen=String(v.generated_at_jst||v.asof||'不明').replace(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})\+09:00$/,'$1 $2');
+let html='<p class="update-meta"><span class="update-label">最終データ生成（日本時間）</span><strong class="update-time">'+e(gen)+'</strong></p><h2>USD/JPY（ドル円）：4時間足ルールによる評価</h2>';
 html+='<p id="scores">買いスコア '+e(v.buy)+'% ／ 売りスコア '+e(v.sell)+'%</p>';
 for(const label of ['日足','4時間足','1時間足','15分足']){
 const a=tf[label];if(!a)continue;
