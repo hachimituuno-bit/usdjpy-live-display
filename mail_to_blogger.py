@@ -13,7 +13,7 @@ import smtplib
 import ssl
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
-from email.utils import parseaddr
+from email.utils import parseaddr, format_datetime, make_msgid
 from pathlib import Path
 
 JST = timezone(timedelta(hours=9))
@@ -124,8 +124,9 @@ def send_post(subject: str, body: str) -> None:
     msg['From'] = username
     msg['To'] = recipient
     msg['Subject'] = subject
-    msg.set_content(body, charset='utf-8')
-
+    msg['Date'] = format_datetime(datetime.now(JST))
+    msg['Message-ID'] = make_msgid()
+    msg.set_content(body, charset='utf-8', cte='quoted-printable')
     try:
         if port == 465:
             with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=30) as smtp:
