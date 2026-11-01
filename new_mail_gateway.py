@@ -1,4 +1,4 @@
-"""Mail2Blogger delivery for the private auto-blog repository.
+"""Mail2Blogger delivery for the new standalone articles repository.
 
 No Blogger API, OAuth token, Google Cloud OAuth app, or Apps Script.
 SMTP acceptance is *not* proof that Blogger published the article.
@@ -85,8 +85,14 @@ def publish(title: str, body: str, labels=None, is_draft=False, *, attachment_pa
     password = os.getenv('SMTP_PASSWORD', '')
     if not password:
         raise RuntimeError('SMTP_PASSWORDがありません（既存のGmailアプリパスワードを設定してください）')
-    host = os.getenv('SMTP_HOST', 'smtp.gmail.com').strip()
-    port = int(os.getenv('SMTP_PORT', '465'))
+    # GitHub Actions passes an empty string when an optional Secret is unset.
+    # Treat both a missing value and an empty value as the Gmail SMTP default.
+    host = (os.getenv('SMTP_HOST') or '').strip() or 'smtp.gmail.com'
+    port_text = (os.getenv('SMTP_PORT') or '').strip() or '465'
+    try:
+        port = int(port_text)
+    except ValueError:
+        raise ValueError('SMTP_PORTには465または587を数字で設定してください') from None
     if not host or '\n' in host or port not in (465, 587):
         raise ValueError('SMTP_HOST / SMTP_PORTの設定が不正です')
     msg = EmailMessage()
