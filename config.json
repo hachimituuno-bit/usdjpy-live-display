@@ -1,0 +1,5 @@
+{
+  "gemini_model": "gemini-3-flash-preview",
+  "min_sources": 2,
+  "topics": []
+}
