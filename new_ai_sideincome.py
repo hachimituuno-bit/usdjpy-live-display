@@ -332,13 +332,8 @@ def main():
     state.setdefault('backup_used', [])
     state.setdefault('category_history', [])
     state.setdefault('article_history', [])
-    # Prevent a second successful post on the same Japan calendar day.
-    
+    # Allow multiple AI side-income posts on the same Japan calendar day.
     today = datetime.now(JST).date().isoformat()
-    from new_mail_gateway import is_preview
-    if state.get('last_post_date') == today and not is_preview():
-        print('本日のAI副業記事は既に送信済み。再投稿しません。')
-        return
 
     # Focus on one distinct side-income niche per article. No fragile RSS dependency.
     backup = write_backup_article(state)
