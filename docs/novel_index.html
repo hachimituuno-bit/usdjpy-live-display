@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>刻限の偽証｜全30話・自動更新の目次</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6fa; color: #172a40; font-family: -apple-system, BlinkMacSystemFont, 'Yu Gothic', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif; line-height: 1.55; }
+  main { max-width: 900px; margin: 0 auto; padding: 22px 13px 40px; }
+  h1 { font-size: clamp(23px, 4.1vw, 32px); line-height: 1.35; margin: 0 0 8px; }
+  .intro { color: #526172; margin: 0 0 16px; font-size: 14px; }
+  .bar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+  .count { font-size: 15px; font-weight: 700; }
+  button { cursor: pointer; font: inherit; font-weight: 700; font-size: 13px; color: #fff; background: #1166cf; border: 0; border-radius: 9px; padding: 9px 15px; }
+  button:disabled { background: #8aa9ce; cursor: default; }
+  #status { font-size: 13px; color: #526172; min-height: 22px; }
+  #status.error { color: #a62d32; }
+  .items { display: grid; gap: 7px; }
+  .item { background: #fff; border: 1px solid #dce3ec; border-radius: 10px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; min-height: 62px; }
+  .num { color: #64748b; width: 66px; min-width: 66px; font-weight: 700; font-size: 14px; }
+  .detail { min-width: 0; flex: 1; }
+  .episode-link { display: block; color: #075aaf; font-size: 16px; text-decoration: none; font-weight: 700; overflow-wrap: anywhere; }
+  .episode-link:hover, .episode-link:focus { text-decoration: underline; }
+  .muted { font-size: 14px; color: #8a94a1; }
+  .date { font-size: 12px; color: #617083; margin-top: 3px; }
+  .note { color: #8f4d13; font-size: 12px; margin-top: 4px; }
+  .footnote { margin: 18px 4px 0; font-size: 12px; color: #637082; }
+  .fallback { display: inline-block; margin-top: 8px; color: #075aaf; }
+  @media (max-width: 480px) { .item { padding: 11px 10px; gap: 8px; } .num { width: 52px; min-width: 52px; font-size: 13px; } .episode-link { font-size: 14px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>刻限の偽証：忘却の島と消えた13時</h1>
+  <p class="intro">連載小説・全30話の目次です。旧方式の第1〜10話も、新方式の第11話以降も、同じ一覧に自動で表示します。ラベルは使用しません。</p>
+  <div class="bar">
+    <div class="count" id="count">公開済みの話数を確認中…</div>
+    <button type="button" id="refresh">最新の一覧に更新</button>
+  </div>
+  <div id="status" role="status" aria-live="polite">Bloggerの公開記事を読み込み中…</div>
+  <div class="items" id="episodes"></div>
+  <p class="footnote">ブログに公開された記事のタイトルとURLをもとに表示します。新しい話の投稿後、ページを開き直すか「最新の一覧に更新」を押してください。公開記事フィードが無効な場合は自動取得できません。</p>
+</main>
+<script>
+(() => {
+  'use strict';
+  const BLOG_ORIGIN = 'https://hachinosuke7.blogspot.com';
+  const SERIES_MARKERS = ['刻限の偽証', '忘却の島と消えた13時'];
+  const EPISODES = 30;
+  const PAGE_SIZE = 100;
+  const MAX_PAGES = 25;
+  const count = document.getElementById('count');
+  const status = document.getElementById('status');
+  const list = document.getElementById('episodes');
+  const refresh = document.getElementById('refresh');
+  let busy = false;
+  let serial = 0;
+
+  function setStatus(message, error = false) {
+    status.textContent = message;
+    status.classList.toggle('error', error);
+  }
+
+  // 公開フィードのJSONP。Bloggerの公式公開フィード以外へはアクセスしません。
+  function getJsonp(start, feedKind) {
+    return new Promise((resolve, reject) => {
+      const cb = '__novel_toc_cb_' + Date.now() + '_' + (++serial);
+      const tag = document.createElement('script');
+      let finished = false;
+      let timer;
+      function finish(err, data) {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        delete window[cb];
+        tag.remove();
+        if (err) reject(err);
+        else resolve(data);
+      }
+      window[cb] = data => finish(null, data);
+      tag.onerror = () => finish(new Error('公開フィードへの接続に失敗しました'));
+      const params = new URLSearchParams({
+        alt: 'json-in-script', 'max-results': String(PAGE_SIZE),
+        'start-index': String(start), callback: cb,
+      });
+      tag.src = BLOG_ORIGIN + '/feeds/posts/' + feedKind + '?' + params.toString();
+      timer = setTimeout(() => finish(new Error('公開フィードの応答がありません')), 12000);
+      document.head.appendChild(tag);
+    });
+  }
+
+  async function getPage(start) {
+    // タイトルと記事URLのみで十分なため、軽いsummaryを優先します。
+    // 公開ブログの設定によってsummaryが使えない場合はdefaultを試します。
+    try { return await getJsonp(start, 'summary'); }
+    catch (firstError) {
+      try { return await getJsonp(start, 'default'); }
+      catch (_) { throw firstError; }
+    }
+  }
+
+  function episodeFromTitle(title) {
+    const normalized = String(title || '').normalize('NFKC');
+    if (!SERIES_MARKERS.every(marker => normalized.includes(marker.normalize('NFKC')))) return null;
+    const found = normalized.match(/第\s*(\d{1,2})\s*話/);
+    if (!found) return null;
+    const n = Number(found[1]);
+    return Number.isInteger(n) && n >= 1 && n <= EPISODES ? n : null;
+  }
+
+  function safePermalink(entry) {
+    const alternate = (entry.link || []).find(x => x.rel === 'alternate' && x.href);
+    if (!alternate) return '';
+    try {
+      const url = new URL(alternate.href, BLOG_ORIGIN);
+      if (url.hostname !== new URL(BLOG_ORIGIN).hostname) return '';
+      if (!/^\/\d{4}\/\d{2}\/[^/]+\.html$/.test(url.pathname)) return '';
+      url.protocol = 'https:';
+      return url.href;
+    } catch (_) { return ''; }
+  }
+
+  function collect(map, entry) {
+    const title = entry && entry.title && entry.title.$t || '';
+    const n = episodeFromTitle(title);
+    if (n === null) return;
+    const url = safePermalink(entry);
+    if (!url) return;
+    const dateRaw = entry.published && entry.published.$t || '';
+    const date = /^\d{4}-\d{2}-\d{2}/.exec(dateRaw)?.[0] || '';
+    const item = { title, url, date };
+    const existing = map.get(n) || [];
+    if (!existing.some(x => x.url === url)) existing.push(item);
+    map.set(n, existing);
+  }
+
+  function render(map) {
+    const published = Array.from(map.keys()).length;
+    const latest = Math.max(0, ...map.keys());
+    count.textContent = '公開済み ' + published + ' / ' + EPISODES + ' 話';
+    list.replaceChildren();
+    const fragment = document.createDocumentFragment();
+    for (let n = 1; n <= EPISODES; n++) {
+      const row = document.createElement('div');
+      row.className = 'item';
+      const num = document.createElement('div');
+      num.className = 'num';
+      num.textContent = '第' + n + '話';
+      const detail = document.createElement('div');
+      detail.className = 'detail';
+      const entries = map.get(n) || [];
+      if (entries.length) {
+        for (const item of entries) {
+          const a = document.createElement('a');
+          a.className = 'episode-link';
+          a.href = item.url;
+          a.target = '_top';
+          a.textContent = item.title.replace(/^【[^】]+】\s*第\s*\d+\s*話\s*/u, '') || '本文を読む';
+          if (a.textContent === item.title) a.textContent = item.title;
+          detail.appendChild(a);
+          if (item.date) {
+            const date = document.createElement('div');
+            date.className = 'date';
+            date.textContent = '公開日 ' + item.date;
+            detail.appendChild(date);
+          }
+        }
+        if (entries.length > 1) {
+          const warning = document.createElement('div');
+          warning.className = 'note';
+          warning.textContent = '同じ話数の記事が複数見つかりました。重複を確認してください。';
+          detail.appendChild(warning);
+        }
+      } else {
+        const state = document.createElement('span');
+        state.className = 'muted';
+        state.textContent = n <= latest ? '記事を確認できません（公開状態を確認）' : '未公開';
+        detail.appendChild(state);
+      }
+      row.append(num, detail);
+      fragment.appendChild(row);
+    }
+    list.appendChild(fragment);
+  }
+
+  async function reload() {
+    if (busy) return;
+    busy = true;
+    refresh.disabled = true;
+    setStatus('Bloggerの公開記事を読み込み中…');
+    const stories = new Map();
+    const seen = new Set();
+    let start = 1, complete = false, page = 0;
+    try {
+      for (; page < MAX_PAGES; page++) {
+        const response = await getPage(start);
+        if (!response || !response.feed) throw new Error('公開フィードの形式が読み取れません');
+        const entries = response.feed.entry || [];
+        const total = Number(response.feed['openSearch$totalResults']?.$t || 0);
+        if (!Array.isArray(entries)) throw new Error('記事一覧の形式が読み取れません');
+        let newPosts = 0;
+        for (const e of entries) {
+          const identity = e.id?.$t || safePermalink(e);
+          if (identity && seen.has(identity)) continue;
+          if (identity) seen.add(identity);
+          newPosts++;
+          collect(stories, e);
+        }
+        render(stories);
+        if (stories.size === EPISODES || entries.length === 0 || newPosts === 0) { complete = true; break; }
+        start += entries.length;
+        if ((total > 0 && start > total) || (total === 0 && entries.length < PAGE_SIZE)) { complete = true; break; }
+        setStatus('公開記事を確認中… ' + stories.size + '話を発見');
+      }
+      if (stories.size === 0) {
+        setStatus('この作品の記事が見つかりませんでした。ブログの公開フィードが有効か、記事タイトルをご確認ください。', true);
+      } else if (!complete) {
+        setStatus('一部の過去記事を確認しきれていません。現在見つかった話数を表示しています。', true);
+      } else {
+        setStatus('公開記事から目次を更新しました。');
+      }
+    } catch (err) {
+      render(stories);
+      setStatus('目次の自動取得に失敗しました。Bloggerの公開フィード設定・通信状態を確認してください。' + (stories.size ? '（取得できた話は表示中）' : ''), true);
+      console.warn('Blogger novel index:', err);
+    } finally {
+      busy = false;
+      refresh.disabled = false;
+    }
+  }
+
+  refresh.addEventListener('click', reload);
+  reload();
+})();
+</script>
+</body>
+</html>
