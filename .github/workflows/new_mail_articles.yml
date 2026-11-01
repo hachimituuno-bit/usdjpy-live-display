@@ -1,0 +1,139 @@
+name: NEW standalone articles (no OAuth, new repository)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: '投稿対象'
+        required: true
+        default: trivia
+        type: choice
+        options:
+          - trivia
+          - story
+          - ai
+          - manga
+      dry_run:
+        description: 'true=プレビューのみ / false=メール投稿1件'
+        required: true
+        type: boolean
+        default: true
+  schedule:
+    # GitHub cron uses UTC. Schedules may be delayed or skipped.
+    - cron: '7 3 * * *'    # 雑学 12:07 JST every day
+    - cron: '7 10 * * *'   # 小説 19:07 JST every day
+    - cron: '17 23 * * *'  # AI副業 08:17 JST every day (previous UTC day)
+    - cron: '30 3 * * *'   # マンガ 12:30 JST (separately disabled until verified)
+
+permissions:
+  contents: write
+
+concurrency:
+  group: new-other-articles-mail-state
+  cancel-in-progress: false
+
+jobs:
+  article:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Select article type (automatic posting is OFF by default)
+        id: choose
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          CRON: ${{ github.event.schedule }}
+          MANUAL_TARGET: ${{ inputs.target }}
+          MANUAL_DRY_RUN: ${{ inputs.dry_run }}
+          ENABLE_TRIVIA: ${{ vars.ENABLE_NEW_MAIL_TRIVIA }}
+          ENABLE_STORY: ${{ vars.ENABLE_NEW_MAIL_STORY }}
+          ENABLE_AI: ${{ vars.ENABLE_NEW_MAIL_AI }}
+          MANGA_ENABLED: ${{ vars.ENABLE_NEW_MAIL_MANGA }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT" == 'workflow_dispatch' ]]; then
+            echo "target=$MANUAL_TARGET" >> "$GITHUB_OUTPUT"
+            echo "dry_run=$MANUAL_DRY_RUN" >> "$GITHUB_OUTPUT"
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          else
+            case "$CRON" in
+              '7 3 * * *') TARGET=trivia;;
+              '7 10 * * *') TARGET=story;;
+              '17 23 * * *') TARGET=ai;;
+              '30 3 * * *') TARGET=manga;;
+              *) echo "Unknown schedule: $CRON"; exit 1;;
+            esac
+            echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+            echo 'dry_run=false' >> "$GITHUB_OUTPUT"
+            case "$TARGET" in
+              trivia) SWITCH="$ENABLE_TRIVIA";;
+              story)  SWITCH="$ENABLE_STORY";;
+              ai)     SWITCH="$ENABLE_AI";;
+              manga)  SWITCH="$MANGA_ENABLED";;
+            esac
+            if [[ "$SWITCH" == 'true' ]]; then
+              echo 'enabled=true' >> "$GITHUB_OUTPUT"
+            else
+              echo 'enabled=false' >> "$GITHUB_OUTPUT"
+              echo "NEW mail schedule disabled: $TARGET. No mail sent."
+            fi
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.choose.outputs.enabled == 'true'
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: new_content_requirements.txt
+      - name: Install lightweight dependencies
+        if: steps.choose.outputs.enabled == 'true'
+        run: pip install -r new_content_requirements.txt
+      - name: Install Japanese font for manga only
+        if: steps.choose.outputs.enabled == 'true' && steps.choose.outputs.target == 'manga'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Generate and preview / send article
+        if: steps.choose.outputs.enabled == 'true'
+        shell: bash
+        env:
+          DRY_RUN: ${{ steps.choose.outputs.dry_run }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CONTENT_STATE_KEY: ${{ secrets.CONTENT_STATE_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          BLOGGER_POST_EMAIL: ${{ secrets.BLOGGER_POST_EMAIL }}
+        run: |
+          set -euo pipefail
+          case '${{ steps.choose.outputs.target }}' in
+            trivia|story) python new_daily_content.py '${{ steps.choose.outputs.target }}';;
+            ai) python new_ai_sideincome.py;;
+            manga) python new_story_manga.py prepare && python new_story_manga.py publish;;
+            *) exit 1;;
+          esac
+      - name: Save new-system state (never change old-system state)
+        if: steps.choose.outputs.enabled == 'true' && steps.choose.outputs.dry_run == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          for f in new_ai_state.json new_daily_content_state.json.enc new_story_manga_state.json; do
+            if [[ -f "$f" ]]; then git add "$f"; fi
+          done
+          if git diff --cached --quiet; then
+            echo 'No new-system state change'; exit 0
+          fi
+          git commit -m 'Advance new Mail2Blogger article state'
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git rebase origin/main
+            if git push origin HEAD:main; then exit 0; fi
+            sleep 3
+          done
+          echo 'Cannot save state; check GitHub before re-running to avoid duplicates'
+          exit 1
