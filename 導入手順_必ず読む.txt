@@ -1,0 +1,96 @@
+【新リポジトリ専用】雑学・連載小説・AI副業・マンガのメール投稿
+対象：hachimituuno-bit/usdjpy-live-display
+作成日：2026年11月1日
+
+★最重要★
+このZIPは公開リポジトリ usdjpy-live-display に追加する専用版です。
+古い auto-blog には入れません。為替／日本株の既存ファイルも変更しません。
+「PRIVATE_CONTENT_STATE_KEY_DO_NOT_UPLOAD.txt」は、必ず別途ダウンロードしてください。
+そのファイルはGitHubにアップロードしないでください。
+
+■ この新方式の特徴
+- 記事を作る：既存の GEMINI_API_KEY （Gemini API）を使用
+- 記事を送る：Gmail SMTP -> Bloggerのメール投稿アドレス（OAuth不要）
+- Blogger APIの「7日ごとの再認証」に依存しない
+- 旧 auto-blog リポジトリのファイルは実行時に一切読み込まない
+- これまでの小説の設定・全30話の設計図を暗号化して引き継ぐ
+- 旧方式が新しい話まで公開していた場合、公開ブログのフィードで確認して内容を同期する
+- 同じ話の重複送信が疑われる／フィードが読めない場合は安全のため小説を停止
+- 自動送信は初期状態で全ジャンル無効。設定をONにするまで実際の投稿はしません。
+
+■ 1. ZIPのアップロード方法
+ZIPをWindowsで解凍する。
+GitHub: https://github.com/hachimituuno-bit/usdjpy-live-display
+A. 「Code」画面（リポジトリの一番上）で「Add file」→「Upload files」。
+   ZIP内の .github フォルダ以外のファイル（.py、.json、.enc、.txt）をアップロードして「Commit changes」。
+B. 次に「.github/workflows」フォルダへ移動し、
+   ZIP内の .github/workflows/new_mail_articles.yml をアップロード。「Commit changes」。
+※GitHubに「ZIPそのもの」をアップロードするのは間違いです。必ず解凍後のファイルを使用。
+※.github/workflows の階層を間違えないこと。
+※new_mail_articles.yml は新規ファイル。既存の為替／株／メール投稿用YMLを上書きしません。
+
+■ 2. GitHub Secretsの設定
+usdjpy-live-display の「Settings」→「Secrets and variables」→「Actions」→「Secrets」。
+Repository secrets に下記を設定：
+- GEMINI_API_KEY      ：以前のauto-blogで使っていた既存のGemini APIキー
+- CONTENT_STATE_KEY   ：別途ダウンロードした PRIVATE_CONTENT_STATE_KEY_DO_NOT_UPLOAD.txt の1行（前後空白なし）
+- SMTP_USERNAME       ：既存のメール送信元Gmailアドレス
+- SMTP_PASSWORD       ：既存のGmailアプリパスワード
+- BLOGGER_POST_EMAIL  ：Bloggerのメール投稿専用アドレス
+SMTP_HOST / SMTP_PORT は任意（省略時 smtp.gmail.com / 465）。
+※旧リポジトリのSecretsは新リポジトリに自動引き継ぎされません。
+※すでに新リポジトリに設定済みのSMTP_...は、そのままでOK。
+※キーの内容はChatGPTや他人に送らず、GitHub Secretへ直接登録してください。
+※Secret CONTENT_STATE_KEY を消したり変更すると小説の続きの復号ができません。鍵ファイルも安全に保管してください。
+
+■ 3. Bloggerの設定
+Bloggerで「設定」→「メールによる投稿」が「すぐに公開」になっていることを確認。
+小説の過去の話を読み取るため、サイトフィードを「完全」に設定してください。
+公開フィードが読めない場合、小説は意図的に止まります。
+
+■ 4. 安全な手動テスト（まず投稿しない）
+GitHub→「Actions」→「NEW standalone articles (no OAuth, new repository)」
+→「Run workflow」
+target を trivia / story / ai から選び、dry_run は true のまま実行する。
+- GitHub Actionsが緑色：プログラムが終了
+- ログに [PREVIEW]、メール未送信と表示：実投稿はしていない
+- 小説は出力された「第○話」を確認し、直前にBloggerに投稿済みの話の次になっているか必ず確認
+- もし「公開フィードを読めない／話数が合わない」と出たら、修正まで小説の投稿を有効化しない
+
+■ 5. 実際のメール送信テスト
+手動 Run workflow で target=trivia または ai、dry_run=false にすると、メール1件を送ります。
+※旧auto-blogが同じジャンルを送っていないことを確認してから。
+※GitHubが緑／SMTP_ACCEPTEDだけでは公開確認になりません。
+Blogger記事一覧に新しい記事が掲載されたか、送信Gmailにエラーメールがないか確認。
+長い記事は過去にBlogger側で拒否されたことがあるため、実際の掲載確認が必須。
+
+■ 6. 本番の自動投稿の有効化（カテゴリごとに個別）
+usdjpy-live-display→Settings→Secrets and variables→Actions→「Variables」。
+「New repository variable」で必要なものだけ名前と値を登録します。
+- ENABLE_NEW_MAIL_AI     = true  ：AI副業（毎日 08:17 JST）
+- ENABLE_NEW_MAIL_TRIVIA = true  ：雑学  （毎日 12:07 JST）
+- ENABLE_NEW_MAIL_STORY  = true  ：小説  （毎日 19:07 JST）
+- ENABLE_NEW_MAIL_MANGA  = true  ：マンガ（毎日 12:30 JST、別途画像添付テスト後のみ）
+どれも登録前はオフ。GitHub Scheduledが表示されてもメール送信はしません。
+マンガの自動投稿は、画像添付が実際にBloggerで表示されるのを確認するまでONにしないでください。
+GitHubのScheduled実行には遅延／取りこぼしの可能性があります。
+
+■ 7. 古いauto-blogの停止について（とても重要）
+新方式で「実際のBloggerへの公開」を確認したカテゴリだけ旧自動投稿を停止。
+- AI副業：旧リポジトリの post.yml
+- 雑学＆小説：旧リポジトリの daily-content.yml（両方の移行準備後に停止）
+- マンガ：旧リポジトリの story_manga.yml
+- 旧・詳細投資記事関係：investment.yml、usdjpy-schedule-new.ymlなどは別問題。
+為替・日本株のダッシュボードを移行したことだけで、旧・詳細投資記事を止めたと判断しないでください。
+旧の停止と新の有効化を同時期に行い、同じ記事の二重投稿を避けてください。
+
+■ その他の注意
+- new_daily_content_state.json.enc の暗号化データに、以前の連載の設定・話数・筋書きが含まれます。
+- 初期状態は2026-10-30終了時点の第9話。新規開始時、公開ブログに第10話以降があれば同期します。
+  実際の最新話が何話なのか、事前にブログ側で確認してください。
+- 旧方式で投稿済みの最新話の本文がフィードに掲載されていない場合、自動追従は止まります。
+- メール投稿はBloggerの記事IDを取得できず、本文ラベルをBloggerの「ラベル」として登録できません。
+- メール投稿が失敗した翌日に次の話を勝手に送らないよう、Bloggerの公開話数を照合します。
+- 送信が承認されても公開確認が取れていないときは、履歴が進んでいる場合があります。
+- メール投稿を繰り返すと、新しい記事が毎回1件増えます。既存記事の投稿日時更新はできません。
+- 本リポジトリの既存の為替／株のプログラムと既存記事の上部ダッシュボード表示には触れません。
