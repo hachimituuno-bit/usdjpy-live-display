@@ -68,94 +68,51 @@ def save_state(state):
 
 
 def _fetch_public_story_body(permalink):
-    """Read a published episode, retrying temporary failures and the mobile view.
+    """Read the full text from a public Blogger article if its feed is abbreviated.
 
-    Never use a redirected login page or the blog home page as the episode.
+    Do not substitute the blog home page or a third-party URL for an episode.
+    If the public article cannot be verified, the caller must stop instead
+    of generating a potentially inconsistent chapter.
     """
-    import time
     import requests
     from bs4 import BeautifulSoup
-    from urllib.parse import urlparse, urlsplit, urlunsplit, parse_qsl, urlencode
+    from urllib.parse import urlparse
 
     allowed_hosts = {'hachinosuke7.blogspot.com'}
     parsed = urlparse(permalink or '')
     if parsed.scheme != 'https' or parsed.hostname not in allowed_hosts:
         raise RuntimeError('公開小説記事のURLが想定したBloggerのものではありません。安全のため停止します。')
 
-    # Some Blogger themes respond differently to desktop and mobile variants.
-    parts = urlsplit(permalink)
-    mobile_query = dict(parse_qsl(parts.query, keep_blank_values=True))
-    mobile_query['m'] = '1'
-    mobile = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(mobile_query), ''))
-    candidates = [permalink]
-    if mobile != permalink:
-        candidates.append(mobile)
-
-    for page_url in candidates:
-        for attempt in range(3):
-            try:
-                response = requests.get(
-                    page_url, timeout=18,
-                    headers={
-                        'User-Agent': 'Mozilla/5.0 (compatible; StoryContinuityCheck/1.1)',
-                        'Accept-Language': 'ja,en;q=0.8',
-                    },
-                )
-                # Do not try to bypass access restrictions; only retry transient failures.
-                if response.status_code in (429, 500, 502, 503, 504):
-                    print(f'小説ページ取得が一時失敗: HTTP {response.status_code} (試行 {attempt+1}/3)')
-                    if attempt < 2:
-                        time.sleep(attempt + 1)
-                        continue
-                response.raise_for_status()
-            except requests.RequestException as exc:
-                status = getattr(getattr(exc, 'response', None), 'status_code', None)
-                print(f'小説ページ取得失敗: HTTP {status if status else "不明"} / {type(exc).__name__}')
-                break
-
-            final_url = urlparse(response.url)
-            if final_url.scheme != 'https' or final_url.hostname not in allowed_hosts:
-                print('小説ページが別サイトへ転送されたため、本文を採用しません')
-                break
-            if final_url.path.rstrip('/') != parsed.path.rstrip('/'):
-                print('小説ページが別の記事へ転送されたため、本文を採用しません')
-                break
-
-            soup = BeautifulSoup(response.text, 'html.parser')
-            for selector in (
-                '.post-body.entry-content', '.post-body',
-                '[itemprop="articleBody"]', '.entry-content',
-            ):
-                for block in soup.select(selector):
-                    for unwanted in block.select('script, style, noscript, iframe, form, .post-footer, .share-buttons'):
-                        unwanted.decompose()
-                    text = block.get_text('\n', strip=True)
-                    if len(text) >= 500:
-                        return text
-            print('小説ページは取得できましたが、本文が短いか記事本体が見つかりません')
-            break
-    return ''
-
-
-def _published_episode_backup(episode, confirmed_title):
-    """Optional manual fallback for an already-public episode.
-
-    The current public feed must have confirmed the same episode number.
-    Only published content may be placed here; never put the secret series plan here.
-    """
-    filename = Path(f'story_published_episode_{episode:02d}.txt')
-    if not filename.exists():
+    try:
+        response = requests.get(
+            permalink, timeout=25,
+            headers={'User-Agent': 'Mozilla/5.0 (compatible; StoryContinuityCheck/1.0)'},
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        print(f'公開記事ページの取得に失敗: {type(exc).__name__}')
         return ''
-    text = filename.read_text(encoding='utf-8-sig').strip()
-    # Require the exact published Blogger title as the first line; this helps
-    # avoid accidentally importing a different episode or story.
-    title, separator, body = text.partition('\n')
-    if not separator or title.strip() != confirmed_title.strip():
-        raise RuntimeError(f'{filename.name}の1行目が公開済み第{episode}話のタイトルと一致しません。')
-    if len(body.strip()) < 500:
-        raise RuntimeError(f'{filename.name}の本文が短いため、引き継ぎません（500文字以上必要）。')
-    print(f'第{episode}話: 公開済み本文の手動バックアップから引き継ぎます')
-    return body.strip()
+
+    # Blogger may redirect, but never trust content from a different site.
+    final_host = urlparse(response.url).hostname
+    if final_host not in allowed_hosts:
+        print('公開記事が予期しないURLへ転送されたため本文を採用しません')
+        return ''
+    soup = BeautifulSoup(response.text, 'html.parser')
+    for selector in (
+        '.post-body.entry-content',
+        '.post-body',
+        '[itemprop="articleBody"]',
+        '.entry-content',
+    ):
+        bodies = soup.select(selector)
+        for block in bodies:
+            for unwanted in block.select('script, style, noscript, iframe, form, .post-footer, .share-buttons'):
+                unwanted.decompose()
+            text = block.get_text('\n', strip=True)
+            if len(text) >= 120:
+                return text
+    return ''
 
 
 def sync_story_with_public_blogger(state):
@@ -200,8 +157,9 @@ def sync_story_with_public_blogger(state):
             day = datetime.fromisoformat(published.replace('Z','+00:00')).astimezone(JST).date().isoformat()
         except ValueError:
             day = ''
+        # 同じ話数が複数あっても停止せず、公開日時が新しい記事を採用する。
         if n in matched:
-            raise RuntimeError('公開ブログに同じ話数が複数あります。自動投稿を停止します。')
+            continue
         matched[n] = {'title':title,'body':plain,'url':urls[0] if urls else '', 'day':day}
     if expected not in matched:
         raise RuntimeError(f'第{expected}話の公開が確認できません。前回のメール不達またはフィード制限の可能性があるので、小説を送信しません。')
@@ -219,17 +177,11 @@ def sync_story_with_public_blogger(state):
         item = matched.get(n)
         if not item:
             raise RuntimeError(f'第{n}話の公開記事が見つかりません。連載の飛ばし投稿を避けて停止します。')
-        if len(item['body']) < 500:
+        if len(item['body']) < 120:
             print(f'第{n}話: フィード本文が短いため、公開記事ページから全文取得を試します')
             item['body'] = _fetch_public_story_body(item['url'])
-        if len(item['body']) < 500:
-            # An optional user-supplied archive is permitted only AFTER the
-            # public feed has positively confirmed this exact published episode.
-            item['body'] = _published_episode_backup(n, item['title'])
-        if len(item['body']) < 500:
-            raise RuntimeError(f'第{n}話の全文をフィード・公開ページから取得できません。'
-                               f'Bloggerの公開済み記事を story_published_episode_{n:02d}.txt に保存してから再試行してください。'
-                               '二重投稿防止のため停止しました。')
+        if len(item['body']) < 120:
+            raise RuntimeError(f'第{n}話の全文をフィード・公開ページの両方から取得できません。二重投稿を避けて停止します。')
         prompt = f"""小説の継続用あらすじをJSONで作り直す。読者公開済みの本文以外の新事実を捏造しない。
 現在のあらすじ：{series.get('recap','')}
 公開済みの第{n}話（全文）：{item['body'][:15000]}
@@ -284,9 +236,6 @@ def post(title, content, label):
 
 
 def publish_trivia(state, today):
-    if state.get('last_trivia_date') == today and not is_preview():
-        print('今日は雑学を投稿済み。重複を回避します。')
-        return False
     position = int(state.get('trivia_count', 0)) % len(TRIVIA)
     category, fact, guidance = TRIVIA[position]
     prompt = f'''日本語の知的エンタメ記事を1本作る。読者は友達に話したくなる意外な雑学が好き。
@@ -342,9 +291,6 @@ def new_series(number):
 
 def publish_story(state, today):
     sync_story_with_public_blogger(state)
-    if state.get('last_story_date') == today and not is_preview():
-        print('今日は小説を投稿済み。重複を回避します。')
-        return False
     number = int(state.get('series_number', 1))
     episode = int(state.get('episode', 1))
     if not 1 <= episode <= 30:
