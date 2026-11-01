@@ -67,6 +67,54 @@ def save_state(state):
     encrypt_state(state)
 
 
+def _fetch_public_story_body(permalink):
+    """Read the full text from a public Blogger article if its feed is abbreviated.
+
+    Do not substitute the blog home page or a third-party URL for an episode.
+    If the public article cannot be verified, the caller must stop instead
+    of generating a potentially inconsistent chapter.
+    """
+    import requests
+    from bs4 import BeautifulSoup
+    from urllib.parse import urlparse
+
+    allowed_hosts = {'hachinosuke7.blogspot.com'}
+    parsed = urlparse(permalink or '')
+    if parsed.scheme != 'https' or parsed.hostname not in allowed_hosts:
+        raise RuntimeError('公開小説記事のURLが想定したBloggerのものではありません。安全のため停止します。')
+
+    try:
+        response = requests.get(
+            permalink, timeout=25,
+            headers={'User-Agent': 'Mozilla/5.0 (compatible; StoryContinuityCheck/1.0)'},
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        print(f'公開記事ページの取得に失敗: {type(exc).__name__}')
+        return ''
+
+    # Blogger may redirect, but never trust content from a different site.
+    final_host = urlparse(response.url).hostname
+    if final_host not in allowed_hosts:
+        print('公開記事が予期しないURLへ転送されたため本文を採用しません')
+        return ''
+    soup = BeautifulSoup(response.text, 'html.parser')
+    for selector in (
+        '.post-body.entry-content',
+        '.post-body',
+        '[itemprop="articleBody"]',
+        '.entry-content',
+    ):
+        bodies = soup.select(selector)
+        for block in bodies:
+            for unwanted in block.select('script, style, noscript, iframe, form, .post-footer, .share-buttons'):
+                unwanted.decompose()
+            text = block.get_text('\n', strip=True)
+            if len(text) >= 120:
+                return text
+    return ''
+
+
 def sync_story_with_public_blogger(state):
     """Fail closed if latest published episode cannot be checked.
 
@@ -126,8 +174,13 @@ def sync_story_with_public_blogger(state):
     print(f'旧方式の続き {expected+1}〜{latest} 話を公開ブログから同期します')
     for n in range(expected + 1, latest + 1):
         item = matched.get(n)
-        if not item or len(item['body']) < 120:
-            raise RuntimeError(f'第{n}話の全文が取得できません。省略・二重投稿を避けて停止します。')
+        if not item:
+            raise RuntimeError(f'第{n}話の公開記事が見つかりません。連載の飛ばし投稿を避けて停止します。')
+        if len(item['body']) < 120:
+            print(f'第{n}話: フィード本文が短いため、公開記事ページから全文取得を試します')
+            item['body'] = _fetch_public_story_body(item['url'])
+        if len(item['body']) < 120:
+            raise RuntimeError(f'第{n}話の全文をフィード・公開ページの両方から取得できません。二重投稿を避けて停止します。')
         prompt = f"""小説の継続用あらすじをJSONで作り直す。読者公開済みの本文以外の新事実を捏造しない。
 現在のあらすじ：{series.get('recap','')}
 公開済みの第{n}話（全文）：{item['body'][:15000]}
