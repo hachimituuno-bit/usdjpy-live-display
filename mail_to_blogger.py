@@ -30,6 +30,18 @@ def read_json(path: Path) -> dict:
     return data
 
 
+def format_jst(value: object) -> str:
+    """Display ISO timestamps in JST without ISO separators or timezone suffix."""
+    raw = str(value)
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return parsed.strftime("%Y-%m-%d %H:%M:%S")
+        return parsed.astimezone(JST).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return raw
+
+
 def esc(value: object) -> str:
     return html.escape(str(value), quote=True)
 
@@ -57,17 +69,20 @@ def build_post(now: datetime | None = None) -> tuple[str, str, str]:
                 raise ValueError("日本株の買いスコアが不正")
             stock_rows.append((i, str(item["name"]), str(item["symbol"]),
                                str(item["close"]), str(item["date"]), score))
-        fx_at = str(fx["generated_at_jst"])
-        stock_at = str(stock_data["generated_at_jst"])
+        fx_at = format_jst(fx["generated_at_jst"])
+        stock_at = format_jst(stock_data["generated_at_jst"])
     except (KeyError, TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"分析データの項目が不正です: {exc}") from None
 
+    overall = "買い" if buy > sell else "売り" if sell > buy else "中立"
+    overall_color = "#c62828" if buy > sell else "#1768ac" if sell > buy else "#555555"
     timestamp = now.strftime("%Y-%m-%d %H:%M JST")
     subject = f"【新方式・{timestamp}】ドル円と日本株3銘柄の分析"
     plain_lines = [
         "【新方式】ドル円（USD/JPY）・日本株3銘柄 分析速報",
         f"投稿時刻：{timestamp}", "",
         "■ USD/JPY テクニカル分析",
+        f"総合判定：{overall}",
         f"買いスコア：{buy}/100、売りスコア：{sell}/100",
         f"分析データ更新：{fx_at}",
     ]
@@ -130,6 +145,8 @@ def build_post(now: datetime | None = None) -> tuple[str, str, str]:
         '<div style="font-size:21px;font-weight:bold;">【新方式】ドル円と日本株3銘柄の分析</div>'
         f'<div style="margin-top:8px;">投稿時刻：{esc(timestamp)}</div></div>'
         + section("USD/JPY テクニカル分析",
+                  f'<div style="font-size:24px;font-weight:bold;margin-bottom:12px;">'
+                  f'総合判定：<span style="color:{overall_color};">{overall}</span></div>'
                   f'<div style="font-size:18px;margin-bottom:12px;">'
                   f'買い <strong style="color:#c62828;">{buy}/100</strong>　'
                   f'売り <strong style="color:#1768ac;">{sell}/100</strong></div>'
