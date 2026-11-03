@@ -418,7 +418,7 @@ def main():
         print('PREVIEW: AI記事の履歴を変更しません')
         return
 
-    if post.get('mail_status') != 'smtp_accepted':
+    if not str(post.get('id', '')).startswith('smtp-'):
         raise RuntimeError('メール送信結果が不明なため記事履歴を更新しません')
 
     # Store an explicit pending record, not a fictional Blogger publication ID.
