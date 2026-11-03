@@ -107,7 +107,7 @@ def _fetch_public_story_body(permalink, expected_episode=None, expected_series=N
                 if heading:
                     title = heading.get_text(' ', strip=True)
                     if expected_episode is not None and not re.search(
-                            rf'第\\s*{expected_episode}\\s*話', title):
+                            rf'第\s*{expected_episode}\s*話', title):
                         print('取得した記事の話数が一致しません')
                         break
                     if expected_series and expected_series not in title:
@@ -120,7 +120,7 @@ def _fetch_public_story_body(permalink, expected_episode=None, expected_series=N
                                 'script, style, noscript, iframe, form, '
                                 '.post-footer, .share-buttons'):
                             el.decompose()
-                        body = block.get_text('\\n', strip=True)
+                        body = block.get_text('\n', strip=True)
                         if len(body) >= 120:
                             return body
                 print('公開記事は取得できましたが本文が短すぎます')
@@ -189,7 +189,7 @@ def sync_story_with_public_blogger(state):
             return body
         # Request the full entry directly when the main Blogger feed is abbreviated.
         feed_id = item.get('feed_id', '')
-        post_match = re.search(r'post-(\\d+)$', feed_id)
+        post_match = re.search(r'post-(\d+)$', feed_id)
         if post_match:
             try:
                 entry_url = base + '/feeds/posts/default/' + post_match.group(1)
