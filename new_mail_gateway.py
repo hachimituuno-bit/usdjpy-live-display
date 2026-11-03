@@ -186,10 +186,14 @@ def build_mail(subject: str, body: str, from_addr: str, to_addr: str,
         msg.set_content(readable_text(body).rstrip() + '\n\n#end\n',
                         charset='utf-8', cte='quoted-printable')
     elif mode == 'html':
-        # Keep it single-part text/html to avoid Blogger unexpectedly selecting
-        # the text/plain part and discarding all paragraph formatting.
-        msg.set_content(formatted_html(body), subtype='html',
-                        charset='utf-8', cte='quoted-printable')
+        # Match Gmail web compose's multipart/alternative layout: a readable
+        # plain-text fallback followed by the full styled HTML version.
+        # Both parts are base64 encoded for safe delivery of Japanese text.
+        # This changes only the MIME structure; it does NOT guarantee Blogger
+        # accepts the message or selects the HTML part.
+        msg.set_content(readable_text(body), charset='utf-8', cte='base64')
+        msg.add_alternative(formatted_html(body), subtype='html',
+                            charset='utf-8', cte='base64')
     else:
         raise ValueError('MAIL_CONTENT_MODEはhtmlまたはplainにしてください')
     if attachment_path:
