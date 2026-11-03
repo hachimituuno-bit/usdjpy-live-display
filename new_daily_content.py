@@ -538,7 +538,7 @@ JSONのみ返す：{{"title":"今回の副題","html":"<p>...</p>","recap":"継�
 
     # SMTP acceptance is only an intermediate result. Do NOT advance the
     # episode or write a fictional Blogger post ID at this stage.
-    if created.get('mail_status') != 'smtp_accepted':
+    if not str(created.get('id', '')).startswith('smtp-'):
         raise RuntimeError('SMTP受付状態を確認できないため進行状況を更新しません。')
 
     state['pending_story_publication'] = {
