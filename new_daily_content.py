@@ -67,51 +67,71 @@ def save_state(state):
     encrypt_state(state)
 
 
-def _fetch_public_story_body(permalink):
-    """Read the full text from a public Blogger article if its feed is abbreviated.
-
-    Do not substitute the blog home page or a third-party URL for an episode.
-    If the public article cannot be verified, the caller must stop instead
-    of generating a potentially inconsistent chapter.
-    """
+def _fetch_public_story_body(permalink, expected_episode=None, expected_series=None):
+    """Retry public article retrieval; reject a wrong page instead of guessing."""
+    import time
     import requests
     from bs4 import BeautifulSoup
-    from urllib.parse import urlparse
+    from urllib.parse import urlparse, urlsplit, urlunsplit, parse_qsl, urlencode
 
     allowed_hosts = {'hachinosuke7.blogspot.com'}
     parsed = urlparse(permalink or '')
     if parsed.scheme != 'https' or parsed.hostname not in allowed_hosts:
-        raise RuntimeError('公開小説記事のURLが想定したBloggerのものではありません。安全のため停止します。')
+        raise RuntimeError('小説記事URLが想定外のため停止します。')
 
-    try:
-        response = requests.get(
-            permalink, timeout=25,
-            headers={'User-Agent': 'Mozilla/5.0 (compatible; StoryContinuityCheck/1.0)'},
-        )
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        print(f'公開記事ページの取得に失敗: {type(exc).__name__}')
-        return ''
+    candidates = [permalink]
+    # Blogger's mobile layout can be available when its desktop route fails.
+    parts = urlsplit(permalink)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query['m'] = '1'
+    mobile = urlunsplit((parts.scheme, parts.netloc, parts.path,
+                          urlencode(query), parts.fragment))
+    if mobile != permalink:
+        candidates.append(mobile)
 
-    # Blogger may redirect, but never trust content from a different site.
-    final_host = urlparse(response.url).hostname
-    if final_host not in allowed_hosts:
-        print('公開記事が予期しないURLへ転送されたため本文を採用しません')
-        return ''
-    soup = BeautifulSoup(response.text, 'html.parser')
-    for selector in (
-        '.post-body.entry-content',
-        '.post-body',
-        '[itemprop="articleBody"]',
-        '.entry-content',
-    ):
-        bodies = soup.select(selector)
-        for block in bodies:
-            for unwanted in block.select('script, style, noscript, iframe, form, .post-footer, .share-buttons'):
-                unwanted.decompose()
-            text = block.get_text('\n', strip=True)
-            if len(text) >= 120:
-                return text
+    session = requests.Session()
+    for url in candidates:
+        for attempt in range(3):
+            try:
+                response = session.get(
+                    url, timeout=30,
+                    headers={'User-Agent': 'Mozilla/5.0',
+                             'Accept-Language': 'ja,en;q=0.8'}
+                )
+                response.raise_for_status()
+                if urlparse(response.url).hostname not in allowed_hosts:
+                    print('記事の転送先ドメインが不正です')
+                    break
+                soup = BeautifulSoup(response.text, 'html.parser')
+                heading = soup.select_one('h3.post-title, h1.post-title, .post-title')
+                if heading:
+                    title = heading.get_text(' ', strip=True)
+                    if expected_episode is not None and not re.search(
+                            rf'第\\s*{expected_episode}\\s*話', title):
+                        print('取得した記事の話数が一致しません')
+                        break
+                    if expected_series and expected_series not in title:
+                        print('取得した記事の作品名が一致しません')
+                        break
+                for selector in ('.post-body.entry-content', '.post-body',
+                                 '[itemprop="articleBody"]', '.entry-content'):
+                    for block in soup.select(selector):
+                        for el in block.select(
+                                'script, style, noscript, iframe, form, '
+                                '.post-footer, .share-buttons'):
+                            el.decompose()
+                        body = block.get_text('\\n', strip=True)
+                        if len(body) >= 120:
+                            return body
+                print('公開記事は取得できましたが本文が短すぎます')
+            except requests.RequestException as exc:
+                status = getattr(getattr(exc, 'response', None), 'status_code', None)
+                print(f'公開記事取得失敗 ({type(exc).__name__}, HTTP {status}, '
+                      f'経路={"mobile" if "m=1" in url else "normal"}, {attempt+1}/3)')
+                if status in (401, 403, 404, 410):
+                    break
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
     return ''
 
 
@@ -160,7 +180,36 @@ def sync_story_with_public_blogger(state):
         # 同じ話数が複数あっても停止せず、公開日時が新しい記事を採用する。
         if n in matched:
             continue
-        matched[n] = {'title':title,'body':plain,'url':urls[0] if urls else '', 'day':day}
+        matched[n] = {'title':title,'body':plain,'url':urls[0] if urls else '',
+                      'day':day, 'feed_id':e.get('id', {}).get('$t', '')}
+    def verified_body(item, n):
+        """Try the feed first, then a verified public article with retries."""
+        body = item['body']
+        if len(body) >= 120:
+            return body
+        # Request the full entry directly when the main Blogger feed is abbreviated.
+        feed_id = item.get('feed_id', '')
+        post_match = re.search(r'post-(\\d+)$', feed_id)
+        if post_match:
+            try:
+                entry_url = base + '/feeds/posts/default/' + post_match.group(1)
+                rr = requests.get(entry_url, params={'alt':'json'}, timeout=30)
+                rr.raise_for_status()
+                entry = rr.json().get('entry', {})
+                ft = entry.get('title', {}).get('$t', '')
+                if ft == item['title']:
+                    full_html = entry.get('content', {}).get('$t', '')
+                    full = BeautifulSoup(full_html, 'html.parser').get_text(' ', strip=True)
+                    if len(full) >= 120:
+                        return full
+            except (requests.RequestException, ValueError, KeyError) as exc:
+                print('個別記事フィードの取得失敗:', type(exc).__name__)
+        if not item['url']:
+            return ''
+        return _fetch_public_story_body(
+            item['url'], expected_episode=n,
+            expected_series=series['series_title'])
+
     # 2026-11-03 recovery: the stored state advanced to episode 14 after
     # SMTP accepted episode 13, but the public novel index shows only 1-12.
     # Recover only this exact case; never generically roll back an episode.
@@ -174,9 +223,7 @@ def sync_story_with_public_blogger(state):
             excerpts = []
             for n in (11, 12):
                 item = matched[n]
-                body = item['body']
-                if len(body) < 120:
-                    body = _fetch_public_story_body(item['url'])
+                body = verified_body(item, n)
                 if len(body) < 120 or not item['url']:
                     raise RuntimeError(f'第{n}話の本文またはURLを確認できず、復旧を中止します。')
                 excerpts.append(f'【公開済み第{n}話】\n{body[:7000]}')
@@ -207,7 +254,7 @@ def sync_story_with_public_blogger(state):
             raise RuntimeError(f'第{n}話の公開記事が見つかりません。連載の飛ばし投稿を避けて停止します。')
         if len(item['body']) < 120:
             print(f'第{n}話: フィード本文が短いため、公開記事ページから全文取得を試します')
-            item['body'] = _fetch_public_story_body(item['url'])
+            item['body'] = verified_body(item, n)
         if len(item['body']) < 120:
             raise RuntimeError(f'第{n}話の全文をフィード・公開ページの両方から取得できません。二重投稿を避けて停止します。')
         prompt = f"""小説の継続用あらすじをJSONで作り直す。読者公開済みの本文以外の新事実を捏造しない。
