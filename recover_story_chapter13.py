@@ -18,6 +18,31 @@ SERIES = '刻限の偽証：忘却の島と消えた13時'
 JST = timezone(timedelta(hours=9))
 
 
+
+def get_public_post_body(url):
+    """Read the publicly rendered post when Blogger JSON feed omits content.
+
+    Never use text from a whole page (navigation / sidebar / unrelated posts).
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != 'https' or parsed.hostname != 'hachinosuke7.blogspot.com':
+        raise RuntimeError('公開記事URLが想定外です。安全のため停止します。')
+    r = requests.get(url, timeout=30, headers={'User-Agent': 'Mozilla/5.0'})
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, 'html.parser')
+    for selector in ('.post-body.entry-content', '.post-body', 'article .entry-content'):
+        candidates = soup.select(selector)
+        if len(candidates) != 1:
+            continue
+        node = candidates[0]
+        for junk in node.select('script, style, noscript'):
+            junk.decompose()
+        text = node.get_text('\n', strip=True)
+        if len(text) >= 120:
+            return text
+    raise RuntimeError('記事ページから本文を確実に取り出せません。状態は変更しません。')
+
+
 def public_episodes():
     response = requests.get(BLOG + '/feeds/posts/default',
                             params={'alt': 'json', 'max-results': 150}, timeout=30)
@@ -42,6 +67,9 @@ def public_episodes():
             raise RuntimeError(f'第{number}話の公開URLが不明または重複しています。')
         raw = item.get('content', {}).get('$t', '')
         body = BeautifulSoup(raw, 'html.parser').get_text('\n', strip=True)
+        if number in (11, 12) and len(body) < 120:
+            print(f'第{number}話: フィードに本文がないため、公開記事ページを確認します。')
+            body = get_public_post_body(urls[0])
         if number in (11, 12) and len(body) < 120:
             raise RuntimeError(f'第{number}話の本文が取得できません。安全のため停止します。')
         chapters[number] = {'url': urls[0], 'title': title, 'body': body,
