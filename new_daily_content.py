@@ -364,7 +364,107 @@ def new_series(number):
     raise RuntimeError('全30話の構成案を作れなかったため投稿しません')
 
 
+
+def _find_public_story_post(title, sent_at_jst=None):
+    """Return a public Blogger permalink for an exact title, or None.
+
+    Feed errors must never be interpreted as evidence that a message was lost.
+    """
+    import requests
+    from datetime import datetime
+    url = 'https://hachinosuke7.blogspot.com/feeds/posts/default'
+    try:
+        response = requests.get(
+            url, params={'alt': 'json', 'max-results': 150}, timeout=30
+        )
+        response.raise_for_status()
+        entries = response.json().get('feed', {}).get('entry', [])
+    except (requests.RequestException, ValueError, TypeError, KeyError) as exc:
+        raise RuntimeError(
+            '公開Bloggerフィードを確認できません。再送せず確認待ちを維持します。'
+        ) from exc
+
+    for entry in entries:
+        if entry.get('title', {}).get('$t', '') != title:
+            continue
+        published_text = entry.get('published', {}).get('$t', '')
+        if sent_at_jst:
+            try:
+                actual = datetime.fromisoformat(published_text.replace('Z', '+00:00'))
+                sent = datetime.fromisoformat(sent_at_jst.replace('Z', '+00:00'))
+                if actual.tzinfo is None or sent.tzinfo is None:
+                    continue
+                if actual < sent - timedelta(minutes=5):
+                    continue
+            except ValueError:
+                continue
+        links = [
+            link.get('href', '') for link in entry.get('link', [])
+            if link.get('rel') == 'alternate'
+            and link.get('href', '').startswith('https://hachinosuke7.blogspot.com/')
+        ]
+        if links:
+            return links[0]
+    return None
+
+
+def _confirm_pending_story(state):
+    """Commit an episode only after its public Blogger URL is verified."""
+    pending = state.get('pending_story_publication')
+    if not pending:
+        return False
+
+    title = pending.get('title', '')
+    if not title or not pending.get('sent_at_jst'):
+        raise RuntimeError('小説の確認待ち記録が不完全です。自動送信を停止します。')
+
+    public_url = _find_public_story_post(title, pending['sent_at_jst'])
+    if not public_url:
+        raise RuntimeError(
+            f'小説の公開確認待ち: {title}。'
+            'SMTP受付だけでは投稿成功と判断できないため、再送信しません。'
+        )
+
+    if int(state.get('episode', 0)) != int(pending['episode']):
+        raise RuntimeError('確認待ち話数と現在の話数が一致しません。手動確認が必要です。')
+
+    if int(state.get('series_number', 0)) != int(pending['series_number']):
+        raise RuntimeError('確認待ち作品番号が一致しません。手動確認が必要です。')
+
+    series = state.get('series')
+    if not series or str(series.get('series_title')) != pending.get('series_title'):
+        raise RuntimeError('確認待ち作品名が一致しません。手動確認が必要です。')
+
+    ep = int(pending['episode'])
+    state['last_story_date'] = pending['date']
+    state.setdefault('published', []).append({
+        'kind': 'story', 'date': pending['date'],
+        'post_id': '', 'url': public_url,
+        'series': pending['series_number'], 'episode': ep, 'title': title
+    })
+    state['published'] = state['published'][-120:]
+    if ep == 30:
+        state['series_number'] = int(pending['series_number']) + 1
+        state['episode'] = 1
+        state['series'] = None
+    else:
+        series['recap'] = pending['recap']
+        series['previous_url'] = public_url
+        state['episode'] = ep + 1
+        state['series'] = series
+
+    del state['pending_story_publication']
+    save_state(state)
+    print(f'Blogger公開を確認: 第{ep}話 {public_url}')
+    return True
+
+
 def publish_story(state, today):
+    # Pending message must be reconciled BEFORE any story generation/recovery.
+    # This prevents two emails for the same episode.
+    if _confirm_pending_story(state):
+        print('公開済み話数を確定しました。今回は次話を送信しません。')
+        return True
     sync_story_with_public_blogger(state)
     number = int(state.get('series_number', 1))
     episode = int(state.get('episode', 1))
@@ -432,21 +532,29 @@ JSONのみ返す：{{"title":"今回の副題","html":"<p>...</p>","recap":"継�
     else:
         content += f'<p><strong>次回：第{episode+1}話へ続く</strong></p>'
     created = post(title, content, ['連載小説', f'連載小説・{series["genre"]}'])
-    state['last_story_date'] = today
-    state.setdefault('published', []).append({'kind': 'story', 'date': today, 'post_id': str(created['id']),
-                                               'series': number, 'episode': episode, 'title': title})
-    state['published'] = state['published'][-120:]
-    if final:
-        state['series_number'] = number + 1
-        state['episode'] = 1
-        state['series'] = None
-    else:
-        series['recap'] = str(result['recap'])
-        series['previous_url'] = created.get('url', '')
-        state['episode'] = episode + 1
-        state['series'] = series
+    if is_preview():
+        print('PREVIEW: 送信していないため話数と履歴は変更しません。')
+        return True
+
+    # SMTP acceptance is only an intermediate result. Do NOT advance the
+    # episode or write a fictional Blogger post ID at this stage.
+    if created.get('mail_status') != 'smtp_accepted':
+        raise RuntimeError('SMTP受付状態を確認できないため進行状況を更新しません。')
+
+    state['pending_story_publication'] = {
+        'title': title,
+        'series_title': series_title,
+        'series_number': number,
+        'episode': episode,
+        'recap': str(result['recap']),
+        'sent_at_jst': datetime.now(JST).isoformat(),
+        'date': today,
+    }
     save_state(state)
+    print(f'第{episode}話はSMTP受付済み・Blogger公開確認待ち。'
+          '次回は公開確認のみ行い、同じ話を再送信しません。')
     return True
+
 
 
 def main():
