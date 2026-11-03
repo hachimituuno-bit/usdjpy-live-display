@@ -10,37 +10,11 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 
 import requests
-from bs4 import BeautifulSoup
 from new_encrypted_state import load, save
 
 BLOG = 'https://hachinosuke7.blogspot.com'
 SERIES = '刻限の偽証：忘却の島と消えた13時'
 JST = timezone(timedelta(hours=9))
-
-
-
-def get_public_post_body(url):
-    """Read the publicly rendered post when Blogger JSON feed omits content.
-
-    Never use text from a whole page (navigation / sidebar / unrelated posts).
-    """
-    parsed = urlparse(url)
-    if parsed.scheme != 'https' or parsed.hostname != 'hachinosuke7.blogspot.com':
-        raise RuntimeError('公開記事URLが想定外です。安全のため停止します。')
-    r = requests.get(url, timeout=30, headers={'User-Agent': 'Mozilla/5.0'})
-    r.raise_for_status()
-    soup = BeautifulSoup(r.text, 'html.parser')
-    for selector in ('.post-body.entry-content', '.post-body', 'article .entry-content'):
-        candidates = soup.select(selector)
-        if len(candidates) != 1:
-            continue
-        node = candidates[0]
-        for junk in node.select('script, style, noscript'):
-            junk.decompose()
-        text = node.get_text('\n', strip=True)
-        if len(text) >= 120:
-            return text
-    raise RuntimeError('記事ページから本文を確実に取り出せません。状態は変更しません。')
 
 
 def public_episodes():
@@ -65,14 +39,9 @@ def public_episodes():
                 and urlparse(u).hostname == 'hachinosuke7.blogspot.com']
         if len(urls) != 1 or number in chapters:
             raise RuntimeError(f'第{number}話の公開URLが不明または重複しています。')
-        raw = item.get('content', {}).get('$t', '')
-        body = BeautifulSoup(raw, 'html.parser').get_text('\n', strip=True)
-        if number in (11, 12) and len(body) < 120:
-            print(f'第{number}話: フィードに本文がないため、公開記事ページを確認します。')
-            body = get_public_post_body(urls[0])
-        if number in (11, 12) and len(body) < 120:
-            raise RuntimeError(f'第{number}話の本文が取得できません。安全のため停止します。')
-        chapters[number] = {'url': urls[0], 'title': title, 'body': body,
+        # Published title and permalink are adequate for this guarded rollback.
+        # Do not fetch an article page: Google may redirect to a 429 challenge.
+        chapters[number] = {'url': urls[0], 'title': title,
                             'published': item.get('published', {}).get('$t', '')}
     return chapters
 
@@ -105,11 +74,16 @@ def repaired_state(before, chapters):
     after['episode'] = 13
     after['published'] = [row for row in history if row not in bogus]
     after['series']['previous_url'] = chapters[12]['url']
-    # Unpublished chapter 13 may have contaminated the saved recap. Rebuild from
-    # actual public chapters 11 and 12; do not ask Gemini to invent continuity.
+    # The current recap may contain events from unpublished chapter 13.
+    # Never use that text or invent a recap from unavailable page content.
+    # Provide verified public chapter references plus the original 30-episode
+    # outline already retained in the state.
     after['series']['recap'] = (
-        '第12話まで公開済み。以下は公開済み第11話・第12話の本文。これ以降の出来事は未確定。\n\n'
-        + '\n\n'.join(f'【第{n}話】\n{chapters[n]["body"][:7000]}' for n in (11, 12))
+        '第12話まで公開済み。第13話は未公開。未公開第13話の出来事は確定していない。'
+        '第13話は保存済みの全30話構成に沿って、第12話の直後から作成すること。'
+        '以下の公開済み記事を参照できない場合、本文の細部を創作して既成事実にしない。\n'
+        + '\n'.join(f'第{n}話: {chapters[n]["title"]} {chapters[n]["url"]}'
+                    for n in (11, 12))
     )
     published = chapters[12]['published']
     try:
@@ -131,7 +105,8 @@ def main():
     print('修復前の次回話数:', before['episode'])
     print('修復後の次回話数:', after['episode'])
     print('SMTP仮ID付き第13話履歴の除去件数:', removed)
-    print('第12話のURL、継続メモ、最終公開日を公開記事から復元予定')
+    print('第12話URL・公開日時を公開フィードから取得。継続メモは第11/12話のタイトルとURLのみで再設定')
+    print('注意: 本文は取得しません。第13話の詳細な連続性は保証できません。')
     print('その他の連載構成、公開履歴、雑学履歴は維持')
     if not args.apply:
         print('DRY RUN: 状態を書き換えません。')
