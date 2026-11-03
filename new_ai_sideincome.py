@@ -321,8 +321,62 @@ def add_related_articles(body, topic):
         return body
         
 
+def _public_post_url_for_title(title, sent_at_jst=None):
+    """Verify publication using public Blogger Atom feed; no auth and no guesses.
+
+    A missing match can mean delayed/truncated feed, not proof of rejection.
+    """
+    from urllib.parse import urlparse
+
+    blog = 'https://hachinosuke7.blogspot.com'
+    query = {'alt': 'json', 'max-results': '150'}
+    try:
+        response = requests.get(blog + '/feeds/posts/default', params=query,
+                                headers={'User-Agent': 'Mozilla/5.0'}, timeout=25)
+        response.raise_for_status()
+        entries = response.json().get('feed', {}).get('entry', [])
+        for entry in entries:
+            feed_title = entry.get('title', {}).get('$t', '').strip()
+            if feed_title != title.strip():
+                continue
+            if sent_at_jst:
+                try:
+                    sent_time = datetime.fromisoformat(sent_at_jst)
+                    published = datetime.fromisoformat(entry.get('published', {}).get('$t', ''))
+                    # Include a small clock skew allowance, but never treat an old post as a new one.
+                    if published < sent_time - timedelta(minutes=5):
+                        continue
+                except (ValueError, TypeError):
+                    continue
+            links = [link.get('href', '') for link in entry.get('link', [])
+                     if link.get('rel') == 'alternate' and link.get('type', '').startswith('text/html')]
+            for link in links:
+                url = urlparse(link)
+                if url.scheme == 'https' and url.hostname == 'hachinosuke7.blogspot.com':
+                    return link
+    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        print('公開記事フィードの照合に失敗:', type(exc).__name__)
+    return None
+
+
+def _commit_published(state, pending, url):
+    """Apply article histories only after the public URL is verified."""
+    state['last_post_date'] = pending['date']
+    state['seen'] = (state.get('seen', []) + pending.get('keys', []))[-2000:]
+    if pending.get('backup_key'):
+        state.setdefault('backup_used', []).append(pending['backup_key'])
+    state['category_history'] = (state.get('category_history', []) + [pending['topic']])[-30:]
+    state['article_history'] = (state.get('article_history', []) + [pending['title']])[-80:]
+    state['last_published_url'] = url
+    state.pop('pending_publication', None)
+
+
+def _save_ai_state(state):
+    with open(STATE, 'w', encoding='utf-8') as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+
 def main():
-    
     if not os.getenv('GEMINI_API_KEY'):
         sys.exit('Missing GitHub Secret: GEMINI_API_KEY')
 
@@ -332,35 +386,52 @@ def main():
     state.setdefault('backup_used', [])
     state.setdefault('category_history', [])
     state.setdefault('article_history', [])
-    # Allow multiple AI side-income posts on the same Japan calendar day.
-    today = datetime.now(JST).date().isoformat()
 
-    # Focus on one distinct side-income niche per article. No fragile RSS dependency.
+    from new_mail_gateway import is_preview
+    pending = state.get('pending_publication')
+    if pending:
+        print('公開確認待ちの記事があります:', pending.get('title', '(タイトル不明)'))
+        url = _public_post_url_for_title(pending['title'], pending.get('sent_at_jst'))
+        if url:
+            print('Blogger公開を確認:', url)
+            if not is_preview():
+                _commit_published(state, pending, url)
+                _save_ai_state(state)
+            else:
+                print('PREVIEW: 公開は確認しましたが履歴を変更しません')
+        else:
+            print('Bloggerの公開を確認できません。重複防止のため新しい記事は送信しません。')
+            print('配信エラーと投稿一覧を確認し、確認待ち状態は自動解除しないでください。')
+        return
+
+    # Generate one distinct article. Never assume SMTP acceptance == publication.
+    today = datetime.now(JST).date().isoformat()
     backup = write_backup_article(state)
     if not backup:
         print('No article passed quality checks; no post created')
         return
     title, body, keys, topic, backup_key = backup
     print('Selected AI side-income niche: ' + topic)
-
-    # No BLOG_ID/OAuth required for the email-based version.
-    # Related-post API links are not fetched; original article text is preserved.
     post, draft = blogger_post(title, body, [topic, 'AI副収入'])
-    state['last_post_date'] = today
-    from new_mail_gateway import is_preview
-    print(('Preview' if is_preview() else 'SMTP accepted (Blogger publication unconfirmed)') + ': ' + str(post.get('id')))
-    state['seen'] = (state['seen'] + keys)[-2000:]
-    if backup_key:
-        state['backup_used'].append(backup_key)
-    state['category_history'] = (state['category_history'] + [topic])[-30:]
-    state['article_history'] = (state['article_history'] + [title])[-80:]
-    
-    from new_mail_gateway import is_preview
-    if not is_preview():
-        with open(STATE, 'w', encoding='utf-8') as f:
-            json.dump(state, f, ensure_ascii=False, indent=2)
-    else:
+
+    if is_preview():
         print('PREVIEW: AI記事の履歴を変更しません')
+        return
+
+    if post.get('mail_status') != 'smtp_accepted':
+        raise RuntimeError('メール送信結果が不明なため記事履歴を更新しません')
+
+    # Store an explicit pending record, not a fictional Blogger publication ID.
+    # Do not advance topic/title histories until the post is publicly verified.
+    state['pending_publication'] = {
+        'title': title, 'date': today, 'topic': topic,
+        'keys': keys, 'backup_key': backup_key,
+        'smtp_receipt': post.get('id', ''),
+        'sent_at_jst': datetime.now(JST).isoformat(timespec='seconds'),
+    }
+    _save_ai_state(state)
+    print('SMTP受付済み・Blogger公開確認待ち。記事履歴はまだ進めません。')
+    print('次回は公開照合のみ行い、確認できない限り再送信しません。')
 
 
 if __name__ == '__main__':
