@@ -63,16 +63,25 @@ def repaired_state(before, chapters):
         raise RuntimeError('published履歴の形式が不正です。')
     bogus = [row for row in history if isinstance(row, dict) and row.get('kind') == 'story'
              and row.get('episode') == 13 and row.get('series') == before.get('series_number')]
-    # Do not remove unrelated posts, and never silently discard multiple records.
-    if len(bogus) > 1:
-        raise RuntimeError('第13話の送信記録が複数あります。手動確認が必要です。')
+    # Repeated SMTP acceptance can produce multiple false-positive history rows.
+    # Only remove records with synthetic SMTP IDs. Refuse if any record looks
+    # like a real Blogger publication or references a public permalink.
     for row in bogus:
-        if not str(row.get('post_id', '')).startswith('smtp-'):
-            raise RuntimeError('第13話の履歴がSMTP仮IDではありません。変更しません。')
+        post_id = str(row.get('post_id', ''))
+        if not post_id.startswith('smtp-'):
+            raise RuntimeError('第13話の履歴にSMTP仮ID以外があります。変更しません。')
+        if row.get('url') or row.get('blogger_url'):
+            raise RuntimeError('第13話の履歴に公開URLがあります。変更しません。')
+        if row.get('title') and not re.search(r'第\s*13\s*話', str(row['title'])):
+            raise RuntimeError('第13話の履歴タイトルが一致しません。変更しません。')
+    if bogus:
+        print(f'第13話のSMTP仮ID履歴 {len(bogus)} 件を検出。'
+              '公開URLのない仮記録のみ修復対象とします。')
 
     after = copy.deepcopy(before)
     after['episode'] = 13
-    after['published'] = [row for row in history if row not in bogus]
+    bogus_ids = {id(row) for row in bogus}
+    after['published'] = [copy.deepcopy(row) for row in history if id(row) not in bogus_ids]
     after['series']['previous_url'] = chapters[12]['url']
     # The current recap may contain events from unpublished chapter 13.
     # Never use that text or invent a recap from unavailable page content.
