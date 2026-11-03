@@ -161,7 +161,35 @@ def sync_story_with_public_blogger(state):
         if n in matched:
             continue
         matched[n] = {'title':title,'body':plain,'url':urls[0] if urls else '', 'day':day}
+    # 2026-11-03 recovery: the stored state advanced to episode 14 after
+    # SMTP accepted episode 13, but the public novel index shows only 1-12.
+    # Recover only this exact case; never generically roll back an episode.
     if expected not in matched:
+        recovery_title = '刻限の偽証：忘却の島と消えた13時'
+        if (expected == 13 and int(state.get('episode', 1)) == 14
+                and str(series.get('series_title', '')) == recovery_title
+                and set(matched) == set(range(1, 13))):
+            # Ensure the public chapter 11/12 bodies are available before
+            # rebuilding context, so a failed lookup cannot alter state.
+            excerpts = []
+            for n in (11, 12):
+                item = matched[n]
+                body = item['body']
+                if len(body) < 120:
+                    body = _fetch_public_story_body(item['url'])
+                if len(body) < 120 or not item['url']:
+                    raise RuntimeError(f'第{n}話の本文またはURLを確認できず、復旧を中止します。')
+                excerpts.append(f'【公開済み第{n}話】\n{body[:7000]}')
+            # Never reuse the stored recap: it may include an unpublished 13th chapter.
+            series['recap'] = ('第12話まで公開済み。次は第13話。以下は公開済み本文の抜粋です。\n'
+                               + '\n\n'.join(excerpts))
+            series['previous_url'] = matched[12]['url']
+            state['episode'] = 13
+            if matched[12]['day']:
+                state['last_story_date'] = matched[12]['day']
+            print('公開済み第1〜12話を確認。未公開の第13話から再開するよう進行状態を補正します。')
+            save_state(state)
+            return
         raise RuntimeError(f'第{expected}話の公開が確認できません。前回のメール不達またはフィード制限の可能性があるので、小説を送信しません。')
     latest = max(matched)
     if latest < expected:
