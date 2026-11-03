@@ -1,0 +1,38 @@
+name: TEST Blogger mail delivery (manual only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-mail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install mail dependencies
+        run: python -m pip install beautifulsoup4
+      - name: Send exactly one safe test email to Blogger
+        env:
+          DRY_RUN: 'false'
+          MAIL_CONTENT_MODE: 'html'
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          BLOGGER_POST_EMAIL: ${{ secrets.BLOGGER_POST_EMAIL }}
+        run: |
+          python - <<'PY'
+          from new_mail_gateway import publish
+          publish(
+              '【動作確認】GitHubからBloggerへのメール投稿テスト',
+              '<p>これはGitHub Actionsからのテスト投稿です。小説や雑学の状態には影響しません。</p>',
+          )
+          PY
