@@ -85,12 +85,16 @@ def cluster_candidates(items, seen):
 
 
 def gemini(prompt):
+    """Generate JSON, avoiding repeated requests after a 429 rate-limit response."""
     key = os.environ['GEMINI_API_KEY']
     model = CFG['gemini_model']
     endpoint = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
-    import time
 
-    for attempt in range(3):
+    # Retry transient server/network errors once. A 429 can indicate an exhausted
+    # daily quota; automatic retries cannot safely distinguish it from short-term
+    # limits, so stop immediately instead of consuming more requests.
+    max_attempts = 2
+    for attempt in range(max_attempts):
         try:
             r = requests.post(
                 endpoint,
@@ -104,9 +108,13 @@ def gemini(prompt):
                 },
                 timeout=90
             )
+            if r.status_code == 429:
+                raise RuntimeError(
+                    'Gemini API HTTP 429: 利用枠またはレート制限です。'
+                    '自動再試行せず停止します。AI StudioでRPD/RPMを確認してください。'
+                )
             r.raise_for_status()
             break
-
         except (
             requests.exceptions.Timeout,
             requests.exceptions.ConnectionError,
@@ -115,18 +123,15 @@ def gemini(prompt):
             status = (
                 e.response.status_code
                 if isinstance(e, requests.exceptions.HTTPError)
-                and e.response is not None
-                else None
+                and e.response is not None else None
             )
-
-            if status is not None and status not in (429, 500, 502, 503, 504):
+            if status is not None and status not in (500, 502, 503, 504):
                 raise
-
-            if attempt == 2:
+            if attempt + 1 >= max_attempts:
                 raise
-
-            print(f'Gemini API一時エラー。20秒後に再試行します（{attempt + 1}/3）')
+            print('Gemini一時エラー: 20秒後に最後の1回だけ再試行します')
             time.sleep(20)
+
     data = r.json()
     raw = ''.join(p.get('text', '') for p in data['candidates'][0]['content']['parts'])
     try:
@@ -142,6 +147,7 @@ def gemini(prompt):
                 except json.JSONDecodeError:
                     continue
         raise ValueError('Geminiの返答からJSONを読み取れませんでした')
+
 
 STYLE = '''あなたは「AIを使って収入を増やしたい・出費を減らしたい」初心者向けの人気ブログ編集者です。
 テーマはAI副業、AIを使った仕事、節約、収益化の現実的な方法。
