@@ -21,7 +21,7 @@ def calculate_fx_four_timeframes():
     hourly_close.index = hourly_close.index.tz_convert('UTC') if hourly_close.index.tz is not None else hourly_close.index.tz_localize('UTC')
     h4_close = hourly_close.resample('4h', origin='start_day').last().dropna()
     scores = {}
-    for name, close, weight in [('日足', daily_close, 20), ('4時間足', h4_close, 20), ('1時間足', hourly_close, 20)]:
+    for name, close, weight in [('日足', daily_close, 10), ('4時間足', h4_close, 15), ('1時間足', hourly_close, 25)]:
         if len(close) < 28:
             raise ValueError(f'{name}のMA28を計算するためのデータが足りません')
         ma7 = float(close.tail(7).mean())
@@ -54,7 +54,7 @@ def calculate_fx_four_timeframes():
     sell_votes = directions.count('売り')
     if buy_votes == sell_votes:
         raise ValueError('15分足の3指標が拮抗し方向を確定できません')
-    scores['15分足'] = {'direction': '買い' if buy_votes > sell_votes else '売り', 'weight': 40, 'ma7': ma7, 'ma28': ma28, 'macd': macd_main, 'macd_signal': macd_signal, 'rsi': rsi, 'buy_votes': buy_votes, 'sell_votes': sell_votes}
+    scores['15分足'] = {'direction': '買い' if buy_votes > sell_votes else '売り', 'weight': 50, 'ma7': ma7, 'ma28': ma28, 'macd': macd_main, 'macd_signal': macd_signal, 'rsi': rsi, 'buy_votes': buy_votes, 'sell_votes': sell_votes}
     buy = sum((item['weight'] for item in scores.values() if item['direction'] == '買い'))
     return {'buy': buy, 'sell': 100 - buy, 'timeframes': scores, 'asof': str(intraday_close.index[-1]), 'source': 'Yahoo Finance (JPY=X)'}
 
