@@ -172,22 +172,21 @@ def render(payload, venue, races, *, demo=False):
              f'<p>データ基準時刻：{escape(payload["data_asof"])}（オッズは変動します）</p>']
     if not demo:
         parts.append(f'<p>データ出典：<a href="{escape(payload["source_url"])}">{escape(payload["source_name"])}</a></p>')
-    for race in races:
+        for race in races:
         parts.append(f'<h3>{escape(venue)} {race["race_number"]}R {escape(race["race_name"])}（{escape(race["post_time"])}発走）</h3>')
         parts.append('<ul>')
         for mark, horse in zip(('◎ 中穴注目', '○ 対抗', '▲ 単穴'), picks_for(race)):
             parts.append(f'<li>{mark}：{horse["number"]}番 {escape(horse["name"])}／参考単勝{horse["win_odds"]:.1f}倍／評価{_rating(horse):.1f}点</li>')
         parts.append('</ul>')
-                parts.append('</ul>')
-                parts.append(
-                    f'<p><strong>【評価根拠】</strong><br>'
-                    f'{escape(race["ratings_method"])}<br><br>'
-                    f'<strong>【評価配分】</strong><br>'
-                    f'近走成績：45％<br>'
-                    f'コース・距離適性：35％<br>'
-                    f'展開・脚質：20％<br><br>'
-                    f'<strong>【注意事項】</strong><br>'
-                    f'この評価は勝率ではありません。</p>'
+        parts.append(
+            f'<p><strong>【評価根拠】</strong><br>'
+            f'{escape(race["ratings_method"])}<br><br>'
+            f'<strong>【評価配分】</strong><br>'
+            f'近走成績：45％<br>'
+            f'コース・距離適性：35％<br>'
+            f'展開・脚質：20％<br><br>'
+            f'<strong>【注意事項】</strong><br>'
+            f'この評価は勝率ではありません。</p>'
         )
             parts.append(
             f'<p><strong>【評価根拠】</strong><br>'
