@@ -178,7 +178,17 @@ def render(payload, venue, races, *, demo=False):
         for mark, horse in zip(('◎ 中穴注目', '○ 対抗', '▲ 単穴'), picks_for(race)):
             parts.append(f'<li>{mark}：{horse["number"]}番 {escape(horse["name"])}／参考単勝{horse["win_odds"]:.1f}倍／評価{_rating(horse):.1f}点</li>')
         parts.append('</ul>')
-        parts.append(f'<p>評価根拠：{escape(race["ratings_method"])}。加重：近走45％、コース・距離35％、展開20％。</p>')
+                parts.append('</ul>')
+                parts.append(
+                    f'<p><strong>【評価根拠】</strong><br>'
+                    f'{escape(race["ratings_method"])}<br><br>'
+                    f'<strong>【評価配分】</strong><br>'
+                    f'近走成績：45％<br>'
+                    f'コース・距離適性：35％<br>'
+                    f'展開・脚質：20％<br><br>'
+                    f'<strong>【注意事項】</strong><br>'
+                    f'この評価は勝率ではありません。</p>'
+        )
             parts.append(
             f'<p><strong>【評価根拠】</strong><br>'
             f'{escape(race["ratings_method"])}<br><br>'
