@@ -1,0 +1,61 @@
+
+name: KEIBA Gemini connection test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test Gemini API
+        env:
+          API_KEY: ${{ secrets.KEIBA_GEMINI_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+          import urllib.error
+
+          key = os.environ.get("API_KEY", "")
+          if not key:
+              raise SystemExit("ERROR: KEIBA_GEMINI_API_KEY is missing")
+
+          url = (
+              "https://generativelanguage.googleapis.com"
+              "/v1beta/models/gemini-2.5-flash-lite:generateContent"
+          )
+
+          payload = {
+              "contents": [{
+                  "parts": [{"text": "日本語で短く挨拶してください。"}]
+              }]
+          }
+
+          request = urllib.request.Request(
+              url,
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "Content-Type": "application/json",
+                  "x-goog-api-key": key
+              },
+              method="POST"
+          )
+
+          try:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  result = json.load(response)
+          except urllib.error.HTTPError as exc:
+              raise SystemExit(f"ERROR: Gemini HTTP {exc.code}")
+          except Exception as exc:
+              raise SystemExit(f"ERROR: {type(exc).__name__}")
+
+          if not result.get("candidates"):
+              raise SystemExit("ERROR: Gemini returned no candidates")
+
+          print("GEMINI_CONNECTION_OK")
+          PY
