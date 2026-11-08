@@ -1,0 +1,31 @@
+name: KEIBA Gemini extracted data guard (offline demo)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify model-extracted records against independent example
+        run: |
+          python keiba_gemini_guard.py --demo --extracted examples/guard_extracted_demo.json --reference examples/guard_reference_demo.json
+      - name: Verify altered horse odds are rejected
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=json.loads(Path('examples/guard_extracted_demo.json').read_text(encoding='utf-8'))
+          p['races'][0]['horses'][0]['win_odds']=9.9
+          Path('/tmp/guard_wrong.json').write_text(json.dumps(p, ensure_ascii=False), encoding='utf-8')
+          PY
+          if python keiba_gemini_guard.py --demo --extracted /tmp/guard_wrong.json --reference examples/guard_reference_demo.json; then
+            echo 'ERROR: altered odds were accepted'; exit 1
+          else
+            echo 'GUARD_REJECT_TEST_OK'
+          fi
