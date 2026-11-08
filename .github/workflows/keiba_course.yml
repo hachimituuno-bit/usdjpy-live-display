@@ -51,11 +51,11 @@ jobs:
         shell: bash
         env:
           ARTICLE_DATE: ${{ inputs.article_date }}
-          COURSE_SMTP_HOST: ${{ secrets.COURSE_SMTP_HOST }}
-          COURSE_SMTP_PORT: ${{ secrets.COURSE_SMTP_PORT }}
-          COURSE_SMTP_USER: ${{ secrets.COURSE_SMTP_USER }}
-          COURSE_SMTP_PASSWORD: ${{ secrets.COURSE_SMTP_PASSWORD }}
-          COURSE_BLOGGER_EMAIL: ${{ secrets.COURSE_BLOGGER_EMAIL }}
+          COURSE_SMTP_HOST: smtp.gmail.com
+          COURSE_SMTP_PORT: '465'
+          COURSE_SMTP_USER: ${{ secrets.SMTP_USERNAME }}
+          COURSE_SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          COURSE_BLOGGER_EMAIL: ${{ secrets.BLOGGER_POST_EMAIL }}
         run: |
           set -euo pipefail
           if [[ -z "${COURSE_SMTP_HOST:-}" || -z "${COURSE_SMTP_USER:-}" || -z "${COURSE_SMTP_PASSWORD:-}" || -z "${COURSE_BLOGGER_EMAIL:-}" ]]; then
