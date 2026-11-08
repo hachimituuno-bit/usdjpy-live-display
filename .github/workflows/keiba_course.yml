@@ -1,0 +1,69 @@
+name: KEIBA course articles (original / optional email)
+on:
+  workflow_dispatch:
+    inputs:
+      article_date:
+        description: 'Date YYYY-MM-DD (Sat/Sun); empty means today JST'
+        required: false
+        type: string
+      send_email:
+        description: 'Send to Blogger? Only after manual approval and secrets setup'
+        required: true
+        default: false
+        type: boolean
+  schedule:
+    # Sat/Sun at 10:37 JST = 01:37 UTC
+    - cron: '37 1 * * 6,0'
+permissions:
+  contents: read
+concurrency:
+  group: keiba-course-articles
+  cancel-in-progress: false
+jobs:
+  create-article:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate general racing article (offline)
+        shell: bash
+        env:
+          ARTICLE_DATE: ${{ inputs.article_date }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${ARTICLE_DATE:-}" ]]; then
+            python keiba_course_article.py --date "$ARTICLE_DATE"
+          else
+            python keiba_course_article.py
+          fi
+      - name: Upload article preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-course-${{ github.run_id }}
+          path: keiba_course_drafts/*.html
+          if-no-files-found: error
+          retention-days: 7
+      - name: Send to Blogger (explicit opt-in only)
+        if: ${{ (github.event_name == 'schedule' && vars.COURSE_AUTO_PUBLISH == 'true') || (github.event_name == 'workflow_dispatch' && inputs.send_email == true) }}
+        shell: bash
+        env:
+          ARTICLE_DATE: ${{ inputs.article_date }}
+          COURSE_SMTP_HOST: ${{ secrets.COURSE_SMTP_HOST }}
+          COURSE_SMTP_PORT: ${{ secrets.COURSE_SMTP_PORT }}
+          COURSE_SMTP_USER: ${{ secrets.COURSE_SMTP_USER }}
+          COURSE_SMTP_PASSWORD: ${{ secrets.COURSE_SMTP_PASSWORD }}
+          COURSE_BLOGGER_EMAIL: ${{ secrets.COURSE_BLOGGER_EMAIL }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${COURSE_SMTP_HOST:-}" || -z "${COURSE_SMTP_USER:-}" || -z "${COURSE_SMTP_PASSWORD:-}" || -z "${COURSE_BLOGGER_EMAIL:-}" ]]; then
+            echo 'ERROR: メール用のSecretsが未設定。送信しません。'
+            exit 1
+          fi
+          if [[ -n "${ARTICLE_DATE:-}" ]]; then
+            python keiba_course_article.py --date "$ARTICLE_DATE" --send
+          else
+            python keiba_course_article.py --send
+          fi
