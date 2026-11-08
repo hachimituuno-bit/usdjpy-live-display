@@ -128,76 +128,112 @@ def picks_for(race):
     return [best, *others[:2]]
 
 def render(payload, venue, races, *, demo=False):
-    escape = lambda x: html.escape(str(x), quote=True)
-    if demo:
-        prefix = '【架空データ／テスト専用・公開禁止】'
-    else:
-        prefix = '【中穴競馬予想】'
-        parts = [
-        '''<style>
-        body {
-            font-family: "Yu Gothic", Meiryo, sans-serif;
-            font-size: 20px;
-            line-height: 1.9;
-            color: #222;
-        }
-        h2 {
-            font-size: 32px;
-            margin: 30px 0;
-        }
-        h3 {
-            font-size: 27px;
-            margin: 40px 0 20px;
-            padding-bottom: 10px;
-            border-bottom: 3px solid #333;
-        }
-        p {
-            font-size: 20px;
-            line-height: 2;
-            margin: 24px 0;
-        }
-        li {
-            font-size: 22px;
-            line-height: 2;
-            margin-bottom: 14px;
-        }
-        ul {
-            background: #f7f7f7;
-            padding: 20px 20px 20px 45px;
-            border-radius: 10px;
-        }
-        </style>''',
-        f'<h2>{prefix}{escape(payload["date"])} {escape(venue)} 10R・11R・12R</h2>',
-             '<p>これは過去成績等の入力評価値に基づく独自の注目馬スコアです。勝率や収益を示すものではありません。</p>',
-             f'<p>データ基準時刻：{escape(payload["data_asof"])}（オッズは変動します）</p>']
+    """Render an offline HTML draft without changing scoring or selection."""
+    escape = lambda value: html.escape(str(value), quote=True)
+    label = '【架空データ／テスト専用・公開禁止】' if demo else '【中穴競馬予想】'
+
+    parts = [
+        '<!doctype html>',
+        '<html lang="ja">',
+        '<head>',
+        '<meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        f'<title>{escape(label)} {escape(payload["date"])} {escape(venue)} 10R・11R・12R</title>',
+        '<style>',
+        '*, *::before, *::after { box-sizing: border-box; }',
+        'body { margin: 0; padding: 24px 16px; background: #f3f5f8; color: #20252c; '
+        'font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; '
+        'font-size: 20px; line-height: 1.8; }',
+        '.page { max-width: 960px; margin: 0 auto; background: white; padding: 30px; '
+        'border-radius: 14px; }',
+        'h1 { font-size: 32px; line-height: 1.5; margin: 14px 0 20px; }',
+        'h2 { font-size: 27px; line-height: 1.5; margin: 0 0 18px; '
+        'border-bottom: 3px solid #364c66; padding-bottom: 12px; }',
+        'h3 { font-size: 21px; margin: 22px 0 10px; }',
+        'p { margin: 12px 0 20px; }',
+        '.tag { display: inline-block; font-size: 18px; font-weight: bold; '
+        'padding: 6px 12px; border-radius: 8px; background: #a62b2b; color: white; }',
+        '.tag.real { background: #245786; }',
+        '.meta { padding: 16px 20px; background: #edf3fa; border-radius: 10px; '
+        'margin: 24px 0; overflow-wrap: anywhere; }',
+        '.race { padding: 24px; margin: 30px 0; border: 1px solid #d6dce5; '
+        'border-radius: 12px; }',
+        '.post { font-size: 18px; color: #4c5664; font-weight: normal; }',
+        '.picks { list-style: none; padding: 0; margin: 0; }',
+        '.picks li { margin: 14px 0; padding: 15px 18px; background: #f6f8fb; '
+        'border-left: 5px solid #7a92b0; border-radius: 6px; overflow-wrap: anywhere; }',
+        '.picks strong { font-size: 22px; }',
+        '.details { margin-top: 24px; padding: 18px 20px; background: #f8fafc; '
+        'border-radius: 10px; overflow-wrap: anywhere; }',
+        '.details p { margin: 8px 0 14px; }',
+        '.details ul { margin: 4px 0 18px; padding-left: 1.5em; }',
+        '.details li { margin: 5px 0; }',
+        '.notice { margin-top: 28px; background: #fff7e8; padding: 18px 20px; '
+        'border-radius: 10px; }',
+        'a { overflow-wrap: anywhere; }',
+        '@media (max-width: 600px) { body { padding: 8px; font-size: 18px; } '
+        '.page { padding: 18px 14px; } .race { padding: 18px 12px; } '
+        'h1 { font-size: 26px; } h2 { font-size: 23px; } '
+        '.picks strong { font-size: 20px; } }',
+        '</style>',
+        '</head>',
+        '<body><main class="page">',
+        f'<div class="tag{"" if demo else " real"}">{escape(label)}</div>',
+        f'<h1>{escape(payload["date"])} {escape(venue)} 10R・11R・12R</h1>',
+        '<p>過去成績などから計算した独自の注目馬スコアです。'
+        '勝率や収益を示すものではありません。</p>',
+        '<div class="meta">',
+        f'<strong>データ基準時刻：</strong>{escape(payload["data_asof"])}',
+        '<p>※単勝オッズは変動します。</p>',
+        '</div>',
+    ]
+
     if not demo:
-        parts.append(f'<p>データ出典：<a href="{escape(payload["source_url"])}">{escape(payload["source_name"])}</a></p>')
-        for race in races:
-        parts.append(f'<h3>{escape(venue)} {race["race_number"]}R {escape(race["race_name"])}（{escape(race["post_time"])}発走）</h3>')
-        parts.append('<ul>')
-        for mark, horse in zip(('◎ 中穴注目', '○ 対抗', '▲ 単穴'), picks_for(race)):
-            parts.append(f'<li>{mark}：{horse["number"]}番 {escape(horse["name"])}／参考単勝{horse["win_odds"]:.1f}倍／評価{_rating(horse):.1f}点</li>')
-        parts.append('</ul>')
         parts.append(
-            f'<p><strong>【評価根拠】</strong><br>'
-            f'{escape(race["ratings_method"])}<br><br>'
-            f'<strong>【評価配分】</strong><br>'
-            f'近走成績：45％<br>'
-            f'コース・距離適性：35％<br>'
-            f'展開・脚質：20％<br><br>'
-            f'<strong>【注意事項】</strong><br>'
-            f'この評価は勝率ではありません。</p>'
+            '<p><strong>データ出典：</strong>'
+            f'<a href="{escape(payload["source_url"])}">'
+            f'{escape(payload["source_name"])}</a></p>'
         )
+
+    for race in races:
+        parts.extend([
+            '<section class="race">',
+            f'<h2>{escape(venue)} {race["race_number"]}R '
+            f'{escape(race["race_name"])}'
+            f'<span class="post">（{escape(race["post_time"])}発走）</span></h2>',
+            '<ul class="picks">',
+        ])
+        for mark, horse in zip(('◎ 中穴注目', '○ 対抗', '▲ 単穴'), picks_for(race)):
             parts.append(
-            f'<p><strong>【評価根拠】</strong><br>'
-            f'{escape(race["ratings_method"])}<br><br>'
-            f'<strong>【評価配分】</strong><br>'
-            f'近走成績：45％<br>'
-            f'コース・距離適性：35％<br>'
-            f'展開・脚質：20％<br><br>'
-            f'<strong>【注意事項】</strong><br>'
-            f'この評価は勝率ではありません。</p>'
-        )
+                f'<li><strong>{mark}</strong><br>'
+                f'{horse["number"]}番 {escape(horse["name"])}<br>'
+                f'参考単勝：{horse["win_odds"]:.1f}倍<br>'
+                f'評価：{_rating(horse):.1f}点</li>'
+            )
+        parts.extend([
+            '</ul>',
+            '<div class="details">',
+            '<h3>【評価根拠】</h3>',
+            f'<p>{escape(race["ratings_method"])}</p>',
+            '<h3>【評価配分】</h3>',
+            '<ul>',
+            '<li>近走成績：45％</li>',
+            '<li>コース・距離適性：35％</li>',
+            '<li>展開・脚質：20％</li>',
+            '</ul>',
+            '<h3>【注意事項】</h3>',
+            '<p>この評価は勝率ではありません。</p>',
+            '</div>',
+            '</section>',
+        ])
+
+    parts.extend([
+        '<div class="notice"><strong>ご注意</strong>',
+        '<p>5〜20倍は中穴候補を選ぶための目安で、利益を保証しません。'
+        '出走取消・馬場・オッズの変更に注意してください。</p>',
+        '</div>',
+        '</main></body></html>',
+    ])
     return '\n'.join(parts) + '\n'
 
 def main(argv=None):
