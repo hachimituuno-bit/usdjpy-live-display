@@ -133,7 +133,41 @@ def render(payload, venue, races, *, demo=False):
         prefix = '【架空データ／テスト専用・公開禁止】'
     else:
         prefix = '【中穴競馬予想】'
-    parts = [f'<h2>{prefix}{escape(payload["date"])} {escape(venue)} 10R・11R・12R</h2>',
+        parts = [
+        '''<style>
+        body {
+            font-family: "Yu Gothic", Meiryo, sans-serif;
+            font-size: 20px;
+            line-height: 1.9;
+            color: #222;
+        }
+        h2 {
+            font-size: 32px;
+            margin: 30px 0;
+        }
+        h3 {
+            font-size: 27px;
+            margin: 40px 0 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #333;
+        }
+        p {
+            font-size: 20px;
+            line-height: 2;
+            margin: 24px 0;
+        }
+        li {
+            font-size: 22px;
+            line-height: 2;
+            margin-bottom: 14px;
+        }
+        ul {
+            background: #f7f7f7;
+            padding: 20px 20px 20px 45px;
+            border-radius: 10px;
+        }
+        </style>''',
+        f'<h2>{prefix}{escape(payload["date"])} {escape(venue)} 10R・11R・12R</h2>',
              '<p>これは過去成績等の入力評価値に基づく独自の注目馬スコアです。勝率や収益を示すものではありません。</p>',
              f'<p>データ基準時刻：{escape(payload["data_asof"])}（オッズは変動します）</p>']
     if not demo:
