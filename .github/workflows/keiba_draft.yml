@@ -36,6 +36,8 @@ jobs:
         run: |
           set -euo pipefail
           DAY="${INPUT_DATE:-$(TZ=Asia/Tokyo date +%F)}"
+          echo "確認：race_date=$DAY"
+          echo "確認：demo=$INPUT_DEMO"
           if [[ "$INPUT_DEMO" == 'true' ]]; then
             python keiba_predict.py --date "$DAY" --demo
           else
