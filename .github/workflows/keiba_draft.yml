@@ -1,0 +1,50 @@
+name: KEIBA weekend predictions (draft only - no mail)
+on:
+  workflow_dispatch:
+    inputs:
+      race_date:
+        description: 'JRA race date YYYY-MM-DD (Sat/Sun)'
+        required: true
+        type: string
+      demo:
+        description: 'true = synthetic example only; NEVER publish'
+        required: true
+        type: boolean
+        default: false
+  schedule:
+    # 10:30 JST Saturday/Sunday. Draft only; requires authorized local JSON.
+    - cron: '30 1 * * 6,0'
+permissions:
+  contents: read
+concurrency:
+  group: keiba-draft-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate and generate draft only
+        shell: bash
+        env:
+          INPUT_DATE: ${{ inputs.race_date }}
+          INPUT_DEMO: ${{ inputs.demo }}
+        run: |
+          set -euo pipefail
+          DAY="${INPUT_DATE:-$(TZ=Asia/Tokyo date +%F)}"
+          if [[ "$INPUT_DEMO" == 'true' ]]; then
+            python keiba_predict.py --date "$DAY" --demo
+          else
+            python keiba_predict.py --date "$DAY"
+          fi
+      - name: Upload draft artifact (no mail)
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-draft-${{ github.run_id }}
+          path: keiba_drafts/*.html
+          if-no-files-found: ignore
+          retention-days: 7
