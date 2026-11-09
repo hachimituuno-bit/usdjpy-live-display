@@ -82,6 +82,9 @@ def main():
             raise ValueError('URL Context retrieval not confirmed')
         output = ''.join(p.get('text', '') for p in candidate['content']['parts'] if 'text' in p)
         parsed = json.loads(output)
+        print("GEMINI_RESPONSE_KEYS:", list(parsed.keys()))
+        if parsed.get("error"):
+            raise ValueError(f"Gemini reported: {parsed['error']}")
         horses = check_record(parsed)
     except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise SystemExit(f'BLOCKED: extraction not verified ({exc})') from None
