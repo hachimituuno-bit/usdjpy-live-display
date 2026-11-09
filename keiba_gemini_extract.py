@@ -93,6 +93,42 @@ def main():
         print("MISSING_NUMBERS:", parsed.get("missing_numbers", []))
 
         horses = check_record(parsed)
+        
+        # 京都12R・過去レース専用の照合テスト
+        reference_names = {
+            1: "コスモレッド",
+            2: "モルティフレーバー",
+            3: "メイショウハッケイ",
+            4: "エグジスタンス",
+            5: "キシャール",
+            6: "ブルズアイプリンス",
+            7: "アラビアンジョイ",
+            8: "ダノンブランニュー",
+            9: "ナクソス",
+            10: "ニシノトリビュート",
+            11: "サリュエ",
+            12: "ジャンヌローサ",
+            13: "タイガーロード",
+            14: "スウィッチインラヴ",
+            15: "クールフラン",
+            16: "メイクワンズデイ",
+            17: "スマッシング",
+            18: "フロンティエール",
+        }
+
+        mismatches = [
+            f"{h['number']}番: {h['name']}"
+            for h in horses
+            if h["name"] != reference_names.get(h["number"])
+        ]
+
+        if mismatches:
+            raise ValueError(
+                "馬名不一致: " + " / ".join(mismatches)
+            )
+
+        print("HORSE_NAMES_MATCH_OK")
+
 
     except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise SystemExit(f'BLOCKED: extraction not verified ({exc})') from None
