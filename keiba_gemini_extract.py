@@ -88,10 +88,12 @@ def main():
         print("GEMINI_RESPONSE_KEYS:", list(parsed.keys()))
         if parsed.get("error"):
             raise ValueError(f"Gemini reported: {parsed['error']}")
-            print("EXTRACTED_COUNT:", len(parsed.get("horses", [])))
-            print("MISSING_NUMBERS:", parsed.get("missing_numbers", []))
+
+        print("EXTRACTED_COUNT:", len(parsed.get("horses", [])))
+        print("MISSING_NUMBERS:", parsed.get("missing_numbers", []))
 
         horses = check_record(parsed)
+
     except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise SystemExit(f'BLOCKED: extraction not verified ({exc})') from None
     selected = [h for h in horses if 5.0 <= h['win_odds'] <= 20.0]
