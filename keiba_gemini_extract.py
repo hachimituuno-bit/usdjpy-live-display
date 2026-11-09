@@ -21,7 +21,11 @@ def check_record(payload):
         payload.get('venue') not in ('京都', '京都競馬場') or
         type(payload.get('race_number')) is not int or
         payload.get('race_number') != EXPECTED_RACE):
-        raise ValueError('Date/venue/race do not match known historical example')
+                raise ValueError(
+                    f"Date={payload.get('date')!r}, "
+                    f"Venue={payload.get('venue')!r}, "
+                    f"Race={payload.get('race_number')!r}"
+                )
     horses = payload.get('horses')
     if not isinstance(horses, list) or len(horses) != EXPECTED_COUNT:
         raise ValueError('Expected exactly 18 horses')
