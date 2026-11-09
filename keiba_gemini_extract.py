@@ -57,8 +57,11 @@ def main():
         '単勝と複勝を混同しない。結果はJSONだけを出す。'
         '形式: {"date":"2026-11-08","venue":"京都","race_number":12,'
         '"horses":[{"number":1,"name":"馬名","win_odds":10.0}]}。'
-        '不明な値を補完せず、全18頭の単勝が確認できなければ '
-        '{"error":"incomplete"} だけ返してください。'
+        '不明な値は推測しないでください。'
+        '18頭すべて取得できなくても、確認できた馬だけhorsesに入れてください。'
+        '不足している馬番はmissing_numbersに配列で記録してください。'
+        '出力JSONにはdate,venue,race_number,horses,missing_numbersを含めてください。'
+
     )
     body = {'contents': [{'parts': [{'text': prompt}]}],
             'tools': [{'urlContext': {}}],
@@ -85,6 +88,9 @@ def main():
         print("GEMINI_RESPONSE_KEYS:", list(parsed.keys()))
         if parsed.get("error"):
             raise ValueError(f"Gemini reported: {parsed['error']}")
+            print("EXTRACTED_COUNT:", len(parsed.get("horses", [])))
+            print("MISSING_NUMBERS:", parsed.get("missing_numbers", []))
+
         horses = check_record(parsed)
     except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise SystemExit(f'BLOCKED: extraction not verified ({exc})') from None
