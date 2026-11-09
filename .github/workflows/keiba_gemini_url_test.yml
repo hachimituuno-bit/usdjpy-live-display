@@ -29,7 +29,7 @@ jobs:
               raise SystemExit("ERROR: API key missing")
 
           model = "gemini-3.5-flash-lite"
-          target = "https://www.jra.go.jp/use/"
+          target = "https://app.jra.jp/JRADB/accessD.html?CNAME=sw01ddd1008202605021220261108%2F9E"
 
           payload = {
               "contents": [{
