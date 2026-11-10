@@ -1,5 +1,5 @@
 
-"""Test identity consistency of JRA horse pages.
+"""Diagnose JRA horse profile name locations.
 
 Manual read-only test.
 No predictions, email, or Blogger posting.
@@ -8,7 +8,6 @@ No predictions, email, or Blogger posting.
 import argparse
 import json
 import re
-import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -30,43 +29,15 @@ from keiba_jra_past_runs_test import (
 
 
 def clean(value):
-    return re.sub(r"\s+", " ", value).strip()
+    return re.sub(
+        r"\s+", " ", value
+    ).strip()
 
 
-def find_profile_name(soup, expected_name):
-    """Find an exact horse name in a heading or table cell.
-
-    Do not accept a mere substring of the entire page.
-    """
-
-    matches = []
-
-    for element in soup.find_all(
-        ["h1", "h2", "h3", "h4", "th", "td"]
-    ):
-        if element.find(
-            ["h1", "h2", "h3", "h4", "th", "td"]
-        ):
-            continue
-
-        text = clean(
-            element.get_text(" ", strip=True)
-        )
-
-        if text == expected_name:
-            matches.append(element)
-
-    if not matches:
-        raise ValueError(
-            "Exact horse name not found "
-            f"in profile elements: {expected_name}"
-        )
-
-    return expected_name
-
-
-def validate_identity_candidate(horse):
-    parsed = urlparse(horse["horse_url"])
+def validate_candidate(horse):
+    parsed = urlparse(
+        horse["horse_url"]
+    )
 
     if (
         parsed.scheme != "https"
@@ -74,71 +45,108 @@ def validate_identity_candidate(horse):
         or parsed.path != "/JRADB/accessU.html"
     ):
         raise ValueError(
-            f'{horse["name"]}: unexpected horse URL'
+            "Unexpected horse URL"
         )
 
-    values = parse_qs(
+    candidates = parse_qs(
         parsed.query
     ).get("CNAME", [])
 
-    if len(values) != 1 or not values[0]:
+    if (
+        len(candidates) != 1
+        or not candidates[0]
+        or candidates[0]
+        != horse["identity_candidate"]
+    ):
         raise ValueError(
-            f'{horse["name"]}: invalid CNAME'
+            "Invalid CNAME candidate"
         )
 
-    if values[0] != horse["identity_candidate"]:
-        raise ValueError(
-            f'{horse["name"]}: CNAME mismatch'
+    return candidates[0]
+
+
+def describe_element(element):
+    text = clean(
+        element.get_text(
+            " ", strip=True
         )
-
-    return values[0]
-
-
-def verify_horse(session, horse):
-    candidate = validate_identity_candidate(
-        horse
     )
-
-    soup = get_page(
-        session,
-        horse["horse_url"],
-    )
-
-    check_error_page(soup)
-
-    profile_name = find_profile_name(
-        soup,
-        horse["name"],
-    )
-
-    table = find_history_table(soup)
-
-    history_rows = 0
-
-    for tr in table.find_all("tr"):
-        cells = tr.find_all(
-            "td",
-            recursive=False,
-        )
-
-        if len(cells) == 14:
-            history_rows += 1
-
-    if history_rows < 1:
-        raise ValueError(
-            f'{horse["name"]}: no history rows'
-        )
 
     return {
-        "number": horse["number"],
-        "race_result_name": horse["name"],
-        "profile_name": profile_name,
-        "horse_url": horse["horse_url"],
-        "identity_candidate": candidate,
-        "name_exact_match": True,
-        "history_rows_found": history_rows,
-        "identity_verified": False,
-        "official_horse_id_verified": False,
+        "tag": element.name,
+        "id": element.get("id"),
+        "class": element.get(
+            "class", []
+        ),
+        "text": text[:200],
+    }
+
+
+def inspect_name_locations(
+    soup,
+    expected_name,
+):
+    """Find name occurrences without claiming identity."""
+
+    exact_matches = []
+    containing_elements = []
+
+    for element in soup.find_all(True):
+        if element.name in (
+            "script",
+            "style",
+            "noscript",
+        ):
+            continue
+
+        text = clean(
+            element.get_text(
+                " ", strip=True
+            )
+        )
+
+        if not text:
+            continue
+
+        if text == expected_name:
+            exact_matches.append(
+                describe_element(element)
+            )
+
+        elif expected_name in text:
+            # Keep only the smallest matching
+            # elements to avoid collecting
+            # entire page containers.
+            child_contains_name = any(
+                expected_name in clean(
+                    child.get_text(
+                        " ", strip=True
+                    )
+                )
+                for child in element.find_all(
+                    True, recursive=False
+                )
+            )
+
+            if not child_contains_name:
+                containing_elements.append(
+                    describe_element(element)
+                )
+
+    return {
+        "expected_name": expected_name,
+        "exact_matches": (
+            exact_matches[:20]
+        ),
+        "containing_elements": (
+            containing_elements[:20]
+        ),
+        "exact_match_count": len(
+            exact_matches
+        ),
+        "containing_element_count": len(
+            containing_elements
+        ),
     }
 
 
@@ -164,13 +172,18 @@ def main():
         RACE_URL,
     )
 
-    check_error_page(race_soup)
+    check_error_page(
+        race_soup
+    )
 
-    horses = find_horses(race_soup)
+    horses = find_horses(
+        race_soup
+    )
 
     if len(horses) != 11:
         raise ValueError(
-            f"Expected 11 horses, got {len(horses)}"
+            "Expected 11 horses; "
+            f"found {len(horses)}"
         )
 
     candidates = [
@@ -178,56 +191,67 @@ def main():
         for horse in horses
     ]
 
-    if len(candidates) != len(set(candidates)):
+    if len(candidates) != len(
+        set(candidates)
+    ):
         raise ValueError(
             "Duplicate CNAME candidates"
         )
 
-    results = []
+    # Diagnose one known horse first.
+    # Do not make assumptions about
+    # the other ten profiles.
+    horse = horses[0]
 
-    for index, horse in enumerate(horses):
-        print(
-            f'Checking {index + 1}/{len(horses)}: '
-            f'{horse["name"]}',
-            flush=True,
-        )
+    print(
+        f'Diagnosing: {horse["name"]}',
+        flush=True,
+    )
 
-        result = verify_horse(
-            session,
-            horse,
-        )
+    candidate = validate_candidate(
+        horse
+    )
 
-        results.append(result)
+    soup = get_page(
+        session,
+        horse["horse_url"],
+    )
 
-        print(
-            f'OK: {horse["name"]} / '
-            f'{result["history_rows_found"]} '
-            "history rows",
-            flush=True,
-        )
+    check_error_page(
+        soup
+    )
 
-        if index < len(horses) - 1:
-            time.sleep(2)
+    diagnosis = inspect_name_locations(
+        soup,
+        horse["name"],
+    )
+
+    history_table_found = False
+    history_error = None
+
+    try:
+        find_history_table(soup)
+        history_table_found = True
+    except ValueError as exc:
+        history_error = str(exc)
 
     output = {
         "source_race_url": RACE_URL,
-        "horse_count": len(results),
-        "name_exact_matches": sum(
-            result["name_exact_match"]
-            for result in results
+        "horse_name": horse["name"],
+        "horse_url": horse["horse_url"],
+        "identity_candidate": candidate,
+        "name_diagnosis": diagnosis,
+        "history_table_found": (
+            history_table_found
         ),
-        "unique_cname_candidates": len(
-            set(candidates)
-        ),
-        "horses": results,
+        "history_error": history_error,
+        "identity_verified": False,
+        "official_horse_id_verified": False,
         "posting": False,
         "note": (
-            "Checks exact name occurrence in "
-            "profile elements, CNAME uniqueness, "
-            "and history table presence. "
-            "Does not establish an official "
-            "horse ID or independently prove "
-            "horse identity."
+            "Diagnostic only. "
+            "Name occurrences do not "
+            "independently prove identity."
         ),
     }
 
@@ -241,9 +265,13 @@ def main():
     )
 
     print(
-        f"COMPLETE: {len(results)} horses / "
-        f'{output["name_exact_matches"]} '
-        "exact name matches / no posting",
+        "DIAGNOSIS COMPLETE: "
+        f'{horse["name"]} / '
+        f'{diagnosis["exact_match_count"]} '
+        "exact elements / "
+        f'{diagnosis["containing_element_count"]} '
+        "containing elements / "
+        "no posting",
         flush=True,
     )
 
