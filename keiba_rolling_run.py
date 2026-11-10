@@ -17,8 +17,8 @@ from keiba_next_collect import collect
 from keiba_next_race import rank
 
 JST = timezone(timedelta(hours=9))
-HOME = "https://www.jra.go.jp/"
-RACE_LINK = re.compile(r"^/keiba/race/\d+/syutsuba\.html$")
+HOME = "https://www.jra.go.jp/keiba/thisweek/"
+RACE_LINK = re.compile(r"^/keiba/race/\d+(?:/syutsuba\.html|\.html)$")
 DATE_RE = re.compile(r"(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日")
 VENUES = ("東京", "中山", "京都", "阪神", "中京", "新潟", "福島", "小倉", "札幌", "函館")
 UNAVAILABLE = ("公開予定", "出馬表は、", "出馬表は、\n")
@@ -37,8 +37,8 @@ def featured_urls(home_html):
     for a in soup.find_all("a", href=True):
         u = urljoin(HOME, a["href"])
         p = urlparse(u)
-        if p.scheme == "https" and p.hostname == "www.jra.go.jp" and RACE_LINK.fullmatch(p.path):
-            urls.add(u)
+        if p.scheme == "https" and p.hostname in ("www.jra.go.jp", "jra.jp", "own.jra.jp") and RACE_LINK.fullmatch(p.path):
+            urls.add("https://www.jra.go.jp" + p.path)
     return sorted(urls)
 
 
@@ -65,7 +65,7 @@ def metadata(page_html, today):
 
 
 def calendar_race_number(session, day, venue, race_name):
-    url = f"https://jra.jp/keiba/calendar{day.year}/{day.year}/{day.month:02d}/{day.month:02d}{day.day:02d}.html"
+    url = f"https://www.jra.go.jp/keiba/calendar{day.year}/{day.year}/{day.month:02d}/{day.month:02d}{day.day:02d}.html"
     html = fetch(session, url)
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(" ", strip=True)
@@ -139,7 +139,13 @@ def main():
                 print("WAIT: card not yet published", flush=True)
                 continue
             number = calendar_race_number(session, day, venue, name)
-            card_url = discover(page, url)
+            card_page_url = re.sub(r"/syutsuba\.html$", ".html", url)
+            card_page_url = re.sub(r"\.html$", "/syutsuba.html", card_page_url)
+            card_page = fetch(session, card_page_url)
+            if "公開予定" in BeautifulSoup(card_page, "html.parser").get_text(" ", strip=True):
+                print("WAIT: official race card not published", flush=True)
+                continue
+            card_url = discover(card_page, card_page_url)
             card = fetch(session, card_url)
             count = card_row_count(card)
             entries = parse_entries(card, card_url, day.isoformat(), venue, number, name, count)
