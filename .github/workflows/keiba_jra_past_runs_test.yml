@@ -1,0 +1,42 @@
+
+name: KEIBA JRA past runs TEST (manual only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  past-runs-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install requests beautifulsoup4
+
+      - name: Extract JRA horse past runs
+        run: |
+          python keiba_jra_past_runs_test.py \
+            --target-date 2026-11-10 \
+            --max-runs 5 \
+            --output keiba_past_runs_test.json
+
+      - name: Upload test results
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-jra-past-runs-test
+          path: keiba_past_runs_test.json
+          retention-days: 1
+          if-no-files-found: error
