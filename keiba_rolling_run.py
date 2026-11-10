@@ -117,48 +117,32 @@ def metadata(page_html, today, labels=()):
 
 
 def discover_official_card(session, intro_html, intro_url, day, venue, race_name):
-    """Find a card through actual official links, not a fabricated JRADB URL.
+    """Use the JRA featured race's own official syutsuba page.
 
-    The race introduction may have no card link before publication. Check the
-    official JRA race menu as an alternative, but require race identity on the
-    fetched card before returning it. Ambiguity fails closed.
+    Never treat an unpublished placeholder as a valid horse card. The source
+    URL must be one of the already-verified featured race URLs.
     """
-    pages = [(intro_url, intro_html)]
-    for url in ("https://www.jra.go.jp/keiba/", "https://www.jra.go.jp/"):
-        try:
-            pages.append((url, fetch(session, url)))
-        except requests.RequestException as exc:
-            print(f"INFO: official menu unavailable {url}: {exc}", flush=True)
-    links = set()
-    for page_url, html in pages:
-        soup = BeautifulSoup(html, "html.parser")
-        for a in soup.find_all("a", href=True):
-            url = urljoin(page_url, a["href"])
-            parsed = urlparse(url)
-            if (parsed.scheme == "https" and parsed.hostname == "www.jra.go.jp"
-                    and parsed.path == "/JRADB/accessD.html" and parsed.query):
-                links.add(url)
-    verified = []
-    for url in sorted(links):
-        try:
-            html = fetch(session, url)
-            soup = BeautifulSoup(html, "html.parser")
-            heading = " ".join(t.get_text(" ", strip=True) for t in soup.find_all(["h1", "h2", "h3", "title"]))
-            compact = re.sub(r"\s+", "", heading)
-            # Never infer identity from the introduction page or a menu label.
-            if race_name not in compact or venue not in compact:
-                continue
-            # The date must also be present in the card's own heading.
-            date_patterns = (f"{day.year}年{day.month}月{day.day}日",
-                             f"{day.month}月{day.day}日")
-            if not any(x in compact for x in date_patterns):
-                continue
-            verified.append((url, html))
-        except requests.RequestException:
-            continue
-    if len(verified) != 1:
-        raise ValueError(f"Official race-card link not uniquely verified (linked={len(links)}, verified={len(verified)}); wait for publication")
-    return verified[0]
+    parsed = urlparse(intro_url)
+    if parsed.scheme != "https" or parsed.hostname not in ("www.jra.go.jp", "jra.jp"):
+        raise ValueError("Untrusted race introduction URL")
+    match = re.fullmatch(r"/keiba/race/(\d+)(?:/syutsuba\.html|\.html)", parsed.path)
+    if not match:
+        raise ValueError("Unexpected JRA featured race URL")
+    card_url = f"https://www.jra.go.jp/keiba/race/{match.group(1)}/syutsuba.html"
+    card_html = intro_html if parsed.path.endswith("/syutsuba.html") else fetch(session, card_url)
+    soup = BeautifulSoup(card_html, "html.parser")
+    headings = " ".join(t.get_text(" ", strip=True) for t in soup.find_all(["h1", "h2", "h3", "title"]))
+    compact = re.sub(r"\s+", "", headings)
+    if race_name not in compact or venue not in compact:
+        raise ValueError("Official syutsuba page race name or venue mismatch")
+    if not any(d in compact for d in (f"{day.year}年{day.month}月{day.day}日", f"{day.month}月{day.day}日")):
+        raise ValueError("Official syutsuba page date mismatch")
+    body = soup.get_text(" ", strip=True)
+    if re.search(r"出馬表.{0,100}公開予定|出馬表.{0,100}公開していません", body):
+        raise ValueError("Official syutsuba page not yet published")
+    # Downstream validation still requires exactly one complete horse table,
+    # a verified race number, and fully parseable entries.
+    return card_url, card_html
 
 
 def card_race_number(card_html, venue, race_name):
@@ -238,9 +222,6 @@ def main():
         key = f"{day.isoformat()}_{venue}_{name}"
         print(f"CHECK {key}", flush=True)
         try:
-            if "公開予定" in BeautifulSoup(page, "html.parser").get_text(" ", strip=True):
-                print("WAIT: card not yet published", flush=True)
-                continue
             # Never manufacture a race-card URL from a race-introduction URL.
             # The official page must link directly to a unique JRADB card.
             card_url, card = discover_official_card(session, page, url, day, venue, name)
