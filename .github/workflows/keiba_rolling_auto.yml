@@ -1,0 +1,35 @@
+name: KEIBA JRA rolling race discovery (no posting)
+
+on:
+  schedule:
+    - cron: '15 0,3,6,9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keiba-rolling-races
+  cancel-in-progress: false
+
+jobs:
+  rolling-races:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install requests beautifulsoup4
+      - name: Discover upcoming races and calculate provisional ranking
+        run: python keiba_rolling_run.py
+      - name: Save results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-rolling-results
+          path: keiba_rolling_results/
+          if-no-files-found: ignore
+          retention-days: 14
