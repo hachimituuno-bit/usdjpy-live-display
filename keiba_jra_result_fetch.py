@@ -1,8 +1,10 @@
 
-"""Fetch one authorized JRA historical race result as JSON; no posting.
+"""Fetch authorized JRA historical results as JSON.
 
+Standalone test tool. No mail, Blogger, or prediction execution.
 Requires: pip install requests beautifulsoup4
 """
+
 import argparse
 import json
 import re
@@ -14,50 +16,96 @@ import requests
 from bs4 import BeautifulSoup
 
 
-def extract(url: str, html: str) -> dict:
+DATE_PATTERN = re.compile(
+    r'(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日'
+)
+COURSE_PATTERN = re.compile(
+    r'コース\s*[：:]\s*([\d,，]+)\s*メートル'
+    r'\s*[（(]\s*(芝|ダート)'
+)
+
+
+def check_url(url):
     parsed = urlparse(url)
-    if (parsed.scheme != 'https'
-            or parsed.hostname != 'www.jra.go.jp'
-            or parsed.path != '/JRADB/accessS.html'
-            or not parse_qs(parsed.query).get('CNAME')):
-        raise ValueError('JRA公式の個別レース結果URLを指定してください')
-
-    soup = BeautifulSoup(html, 'html.parser')
-    text = soup.get_text(' ', strip=True)
-
-    if 'パラメータエラー' in text or 'エラー013' in text:
-        raise ValueError('JRAがパラメータエラーを返しました')
-
-    # Identify the race-specific date heading, not navigation dates.
-    heading = soup.find(
-        string=re.compile(
-            r'\d{4}年\s*\d{1,2}月\s*\d{1,2}日.*?発走時刻'
+    if (
+        parsed.scheme != 'https'
+        or parsed.hostname != 'www.jra.go.jp'
+        or parsed.path != '/JRADB/accessS.html'
+        or not parse_qs(parsed.query).get('CNAME')
+    ):
+        raise ValueError(
+            'JRA公式の個別レース結果URLが必要です'
         )
-    )
-    if heading is None:
-        raise ValueError('開催日と発走時刻を含むレース見出しが見つかりません')
 
-    dates = re.findall(
-        r'(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日',
-        str(heading)
-    )
-    if len(dates) != 1:
-        raise ValueError('開催日を一意に特定できません')
 
-    try:
-        race_date = date(*map(int, dates[0])).isoformat()
-    except ValueError as exc:
-        raise ValueError('開催日が不正です') from exc
+def parse_date(text):
+    matches = DATE_PATTERN.findall(text)
+    values = set()
 
-    # Example: コース：2,500メートル（芝・左）
-    course_matches = re.findall(
-        r'コース\s*[：:]\s*([\d,，]+)\s*メートル\s*[（(]\s*(芝|ダート)',
-        text
-    )
-    if not course_matches or len(set(course_matches)) != 1:
-        raise ValueError('コースの距離・芝ダートを一意に特定できません')
+    for year, month, day in matches:
+        try:
+            value = date(
+                int(year), int(month), int(day)
+            ).isoformat()
+        except ValueError as exc:
+            raise ValueError(
+                'ページ内の日付が不正です'
+            ) from exc
+        values.add(value)
 
-    distance_text, surface_ja = course_matches[0]
+    return values
+
+
+def extract_metadata(soup):
+    # Keep date and course tied to the race information.
+    # Avoid blindly using navigation or unrelated page dates.
+    candidates = []
+
+    for element in soup.find_all(
+        ['h1', 'h2', 'h3', 'section', 'div', 'table']
+    ):
+        text = element.get_text(' ', strip=True)
+
+        if len(text) > 3000:
+            continue
+
+        dates = parse_date(text)
+        courses = COURSE_PATTERN.findall(text)
+
+        if len(dates) == 1 and len(set(courses)) == 1:
+            candidates.append((
+                len(text),
+                next(iter(dates)),
+                courses[0]
+            ))
+
+    if not candidates:
+        raise ValueError(
+            '開催日とコース情報を同じレース情報領域'
+            'から特定できません'
+        )
+
+    # Prefer the smallest containing HTML region.
+    candidates.sort(key=lambda item: item[0])
+    shortest = candidates[0][0]
+
+    best = [
+        item for item in candidates
+        if item[0] == shortest
+    ]
+
+    unique = {
+        (item[1], item[2]) for item in best
+    }
+
+    if len(unique) != 1:
+        raise ValueError(
+            '開催日またはコース情報が複数あります'
+        )
+
+    race_date, course = next(iter(unique))
+    distance_text, surface_ja = course
+
     distance_m = int(
         distance_text.replace(',', '').replace('，', '')
     )
@@ -65,56 +113,87 @@ def extract(url: str, html: str) -> dict:
     if not 800 <= distance_m <= 4000:
         raise ValueError('距離が対応範囲外です')
 
-    surface = 'turf' if surface_ja == '芝' else 'dirt'
+    surface = (
+        'turf' if surface_ja == '芝' else 'dirt'
+    )
 
-    # Find the finishing-order table.
-    result_table = None
-    for table in soup.find_all('table'):
-        heads = ' '.join(
-            x.get_text(' ', strip=True)
-            for x in table.find_all('th')
+    return race_date, surface, distance_m
+
+
+def extract(url, html):
+    check_url(url)
+
+    soup = BeautifulSoup(html, 'html.parser')
+    page_text = soup.get_text(' ', strip=True)
+
+    if (
+        'パラメータエラー' in page_text
+        or 'エラー013' in page_text
+    ):
+        raise ValueError(
+            'JRAがパラメータエラーを返しました'
         )
+
+    race_date, surface, distance_m = (
+        extract_metadata(soup)
+    )
+
+    result_table = None
+
+    for table in soup.find_all('table'):
+        headers = ' '.join(
+            th.get_text(' ', strip=True)
+            for th in table.find_all('th')
+        )
+
         if all(
-            x in heads
-            for x in ('着順', '馬名', 'コーナー')
+            word in headers
+            for word in ('着順', '馬名', 'コーナー')
         ):
             result_table = table
             break
 
     if result_table is None:
         raise ValueError(
-            '着順・馬名・コーナー通過順位の表が見つかりません'
+            'レース結果表が見つかりません'
         )
 
     rows = []
 
     for tr in result_table.find_all('tr'):
-        cells = tr.find_all('td', recursive=False)
+        cells = tr.find_all(
+            'td', recursive=False
+        )
+
         if not cells:
             continue
 
         vals = [
-            c.get_text(' ', strip=True)
-            for c in cells
+            cell.get_text(' ', strip=True)
+            for cell in cells
         ]
 
         if not re.fullmatch(r'\d+', vals[0]):
             continue
 
         if len(vals) < 10:
-            raise ValueError('結果表の列数が想定外です')
+            raise ValueError(
+                'レース結果表の列数が想定外です'
+            )
 
         finish = int(vals[0])
+
         number = (
             int(vals[2])
             if re.fullmatch(r'\d+', vals[2])
             else None
         )
+
         name = vals[3]
         corners_text = vals[9]
 
         if (
-            not number
+            number is None
             or not name
             or not re.fullmatch(
                 r'\d+(?:\s+\d+)*',
@@ -122,13 +201,12 @@ def extract(url: str, html: str) -> dict:
             )
         ):
             raise ValueError(
-                f'馬番・馬名・コーナー順位の解釈に失敗: '
-                f'{name!r} {corners_text!r}'
+                '馬番・馬名・コーナー順位の'
+                '読み取りに失敗しました'
             )
 
         corners = [
-            int(n)
-            for n in corners_text.split()
+            int(n) for n in corners_text.split()
         ]
 
         rows.append({
@@ -140,32 +218,38 @@ def extract(url: str, html: str) -> dict:
 
     field = len(rows)
 
-    if field < 2:
-        raise ValueError('有効な着順データが不足しています')
-
-    if (
-        len({r['number'] for r in rows}) != field
-        or len({r['finish'] for r in rows}) != field
-    ):
-        raise ValueError('馬番または着順が重複しています')
-
-    if sorted(
-        r['finish'] for r in rows
-    ) != list(range(1, field + 1)):
+    if not 2 <= field <= 30:
         raise ValueError(
-            '着順に欠落があります。'
-            '中止・失格などは現試作版では未対応です'
+            '出走頭数が対応範囲外です'
         )
 
-    for r in rows:
+    if len({
+        row['number'] for row in rows
+    }) != field:
+        raise ValueError('馬番が重複しています')
+
+    if sorted(
+        row['finish'] for row in rows
+    ) != list(range(1, field + 1)):
+        raise ValueError(
+            '着順の重複・欠落があります'
+        )
+
+    for row in rows:
+        if not row['corner_positions']:
+            raise ValueError(
+                'コーナー順位がありません'
+            )
+
         if not all(
-            1 <= p <= field
-            for p in r['corner_positions']
+            1 <= position <= field
+            for position in row['corner_positions']
         ):
             raise ValueError(
                 'コーナー順位が出走頭数の範囲外です'
             )
-        r['field_size'] = field
+
+        row['field_size'] = field
 
     return {
         'source_url': url,
@@ -176,49 +260,40 @@ def extract(url: str, html: str) -> dict:
         'field_size': field,
         'horses': rows,
         'note': (
-            'JRA結果ページから取得した過去走データ。'
+            'JRA公式レース結果ページから取得。'
             '予想対象レースの結果には使用しない。'
         )
     }
 
 
 def main():
-    p = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser()
 
-    p.add_argument('--url', required=True)
-    p.add_argument(
+    parser.add_argument(
+        '--url', required=True
+    )
+    parser.add_argument(
         '--output',
         default='jra_result_test.json'
     )
-
-    # Optional cross-checks; no longer used as data sources.
-    p.add_argument(
-        '--race-date',
-        help='任意の照合用開催日 YYYY-MM-DD'
+    parser.add_argument(
+        '--race-date'
     )
-    p.add_argument(
+    parser.add_argument(
         '--surface',
-        choices=('turf', 'dirt'),
-        help='任意の照合用馬場'
+        choices=('turf', 'dirt')
     )
-    p.add_argument(
+    parser.add_argument(
         '--distance-m',
-        type=int,
-        help='任意の照合用距離m'
+        type=int
     )
 
-    a = p.parse_args()
-    parsed = urlparse(a.url)
+    args = parser.parse_args()
 
-    if (
-        parsed.scheme != 'https'
-        or parsed.hostname != 'www.jra.go.jp'
-        or parsed.path != '/JRADB/accessS.html'
-    ):
-        p.error('JRA公式のレース結果URLのみ対応')
+    check_url(args.url)
 
     response = requests.get(
-        a.url,
+        args.url,
         timeout=20,
         headers={
             'User-Agent': (
@@ -227,40 +302,39 @@ def main():
             )
         }
     )
+
     response.raise_for_status()
     response.encoding = response.apparent_encoding
 
-    data = extract(a.url, response.text)
+    data = extract(
+        args.url, response.text
+    )
 
-    # Reject mismatches instead of overwriting JRA page values.
     if (
-        a.race_date is not None
-        and a.race_date != data['date']
+        args.race_date is not None
+        and args.race_date != data['date']
     ):
-        p.error(
-            f'開催日がJRAページと不一致: '
-            f'{a.race_date} != {data["date"]}'
+        parser.error(
+            '開催日が指定値と一致しません'
         )
 
     if (
-        a.surface is not None
-        and a.surface != data['surface']
+        args.surface is not None
+        and args.surface != data['surface']
     ):
-        p.error(
-            f'馬場がJRAページと不一致: '
-            f'{a.surface} != {data["surface"]}'
+        parser.error(
+            '馬場が指定値と一致しません'
         )
 
     if (
-        a.distance_m is not None
-        and a.distance_m != data['distance_m']
+        args.distance_m is not None
+        and args.distance_m != data['distance_m']
     ):
-        p.error(
-            f'距離がJRAページと不一致: '
-            f'{a.distance_m} != {data["distance_m"]}'
+        parser.error(
+            '距離が指定値と一致しません'
         )
 
-    output = Path(a.output)
+    output = Path(args.output)
 
     output.write_text(
         json.dumps(
@@ -273,7 +347,11 @@ def main():
 
     print(
         f'OK: {output} / '
-        f'{data["field_size"]} horses / no posting'
+        f'{data["field_size"]} horses / '
+        f'{data["date"]} / '
+        f'{data["surface"]} / '
+        f'{data["distance_m"]}m / '
+        'no posting'
     )
 
 
