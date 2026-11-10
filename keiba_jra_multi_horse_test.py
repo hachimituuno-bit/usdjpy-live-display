@@ -2,7 +2,7 @@
 """Test JRA past-run extraction for multiple horses.
 
 Manual read-only test.
-No prediction, email, or Blogger posting.
+No predictions, email, or Blogger posting.
 """
 
 import argparse
@@ -102,6 +102,7 @@ def find_horses(soup):
         validate_horse_url(horse_url)
 
         parsed = urlparse(horse_url)
+
         cname_values = parse_qs(
             parsed.query
         ).get("CNAME", [])
@@ -118,37 +119,26 @@ def find_horses(soup):
             "identity_candidate": cname_values[0],
         })
 
-    if not horses:
+    if len(horses) != 11:
         raise ValueError(
-            "No horses found"
+            "Expected 11 horses; "
+            f"found {len(horses)}"
         )
 
-    numbers = [
-        horse["number"] for horse in horses
-    ]
+    for key in (
+        "number",
+        "name",
+        "horse_url",
+        "identity_candidate",
+    ):
+        values = [
+            horse[key] for horse in horses
+        ]
 
-    names = [
-        horse["name"] for horse in horses
-    ]
-
-    urls = [
-        horse["horse_url"] for horse in horses
-    ]
-
-    if len(numbers) != len(set(numbers)):
-        raise ValueError(
-            "Duplicate horse numbers"
-        )
-
-    if len(names) != len(set(names)):
-        raise ValueError(
-            "Duplicate horse names"
-        )
-
-    if len(urls) != len(set(urls)):
-        raise ValueError(
-            "Duplicate horse URLs"
-        )
+        if len(values) != len(set(values)):
+            raise ValueError(
+                f"Duplicate horse {key}"
+            )
 
     return horses
 
@@ -168,20 +158,29 @@ def fetch_horse_history(
 
     if horse["name"] not in text:
         raise ValueError(
-            f'{horse["name"]}: name not found '
-            "on horse page"
+            f'{horse["name"]}: '
+            "horse name not found on page"
         )
 
-    # The existing single-horse extractor
-    # validates the table structure.
-    # It currently checks TARGET_HORSE too,
-    # so this temporary test is limited to
-    # the same horse until generalized.
     runs, available = extract_runs(
         soup,
         target_date,
         max_runs,
+        horse_name=horse["name"],
     )
+
+    if not 1 <= len(runs) <= max_runs:
+        raise ValueError(
+            f'{horse["name"]}: invalid run count'
+        )
+
+    if any(
+        date.fromisoformat(run["date"]) >= target_date
+        for run in runs
+    ):
+        raise ValueError(
+            f'{horse["name"]}: future race detected'
+        )
 
     return {
         "number": horse["number"],
@@ -223,11 +222,21 @@ def main():
             "--max-runs must be 1 to 5"
         )
 
-    target_date = date.fromisoformat(
-        args.target_date
-    )
+    try:
+        target_date = date.fromisoformat(
+            args.target_date
+        )
+    except ValueError:
+        parser.error(
+            "Invalid target date; use YYYY-MM-DD"
+        )
 
     session = requests.Session()
+
+    print(
+        "Fetching JRA race result",
+        flush=True,
+    )
 
     race_soup = get_page(
         session,
@@ -243,23 +252,12 @@ def main():
         flush=True,
     )
 
-    # Safety gate:
-    # The shared extractor still contains
-    # a hard-coded horse name check.
-    # Stop rather than generate incorrect
-    # multi-horse data.
-    if len(horses) > 1:
-        raise ValueError(
-            "Multi-horse extraction is not yet "
-            "enabled: the shared extractor "
-            "requires horse-specific validation."
-        )
-
     results = []
 
     for index, horse in enumerate(horses):
         print(
-            f'Fetching: {horse["name"]}',
+            f'Fetching {index + 1}/{len(horses)}: '
+            f'{horse["name"]}',
             flush=True,
         )
 
@@ -272,17 +270,36 @@ def main():
 
         results.append(result)
 
+        print(
+            f'OK: {horse["name"]} / '
+            f'{result["extracted_runs"]} runs',
+            flush=True,
+        )
+
         if index < len(horses) - 1:
             time.sleep(2)
 
+    if len(results) != len(horses):
+        raise ValueError(
+            "Horse count mismatch"
+        )
+
     output = {
+        "source_race_url": RACE_URL,
         "target_date": target_date.isoformat(),
+        "max_runs": args.max_runs,
         "horse_count": len(results),
+        "total_extracted_runs": sum(
+            horse["extracted_runs"]
+            for horse in results
+        ),
         "horses": results,
         "posting": False,
         "note": (
-            "Manual validation only. "
-            "Horse identity is not verified."
+            "Manual test only. "
+            "Horse identity is not yet verified. "
+            "Corner positions are not collected. "
+            "Do not use for automatic predictions."
         ),
     }
 
@@ -296,7 +313,8 @@ def main():
     )
 
     print(
-        f"OK: {len(results)} horses / "
+        f'COMPLETE: {len(results)} horses / '
+        f'{output["total_extracted_runs"]} runs / '
         "no posting",
         flush=True,
     )
