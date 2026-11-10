@@ -74,6 +74,9 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--url', required=True)
     p.add_argument('--output', default='jra_result_test.json')
+    p.add_argument('--race-date', help='確認済み開催日 YYYY-MM-DD（任意）')
+    p.add_argument('--surface', choices=('turf', 'dirt'), help='確認済み馬場（任意）')
+    p.add_argument('--distance-m', type=int, help='確認済み距離m（任意）')
     a = p.parse_args()
     parsed = urlparse(a.url)
     if parsed.scheme != 'https' or parsed.hostname != 'www.jra.go.jp' or parsed.path != '/JRADB/accessS.html':
@@ -82,6 +85,25 @@ def main():
     response.raise_for_status()
     response.encoding = response.apparent_encoding
     data = extract(a.url, response.text)
+    supplied = (a.race_date is not None, a.surface is not None, a.distance_m is not None)
+    if any(supplied) and not all(supplied):
+        p.error('開催日・馬場・距離は3項目すべて指定してください')
+    if all(supplied):
+        try:
+            verified_date = date.fromisoformat(a.race_date)
+        except ValueError:
+            p.error('開催日は YYYY-MM-DD で指定してください')
+        if verified_date.isoformat() != a.race_date:
+            p.error('開催日の書式が不正です')
+        if not 800 <= a.distance_m <= 4000:
+            p.error('距離は800〜4000mで指定してください')
+        # Metadata is explicitly supplied by the operator, NOT independently
+        # verified against the JRA HTML. Mark provenance unambiguously.
+        data['date'] = a.race_date
+        data['surface'] = a.surface
+        data['distance_m'] = a.distance_m
+        data['metadata_source'] = 'operator_supplied_unverified'
+        data['note'] = '開催日・馬場・距離は入力値であり、JRAページとの照合は未実施。'
     output = Path(a.output)
     output.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(f'OK: {output} / {data["field_size"]} horses / no posting')
