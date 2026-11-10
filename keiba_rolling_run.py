@@ -73,7 +73,11 @@ def metadata(page_html, today, labels=()):
     names = set()
     for source in sources:
         for match in race_pattern.finditer(source):
-            names.add(match.group(1))
+            candidate = match.group(1)
+            # Page headings may prefix the race name with the event year.
+            # Normalize only a leading four-digit year followed by 年.
+            candidate = re.sub(r"^20\d{2}年", "", candidate)
+            names.add(candidate)
     if len(names) != 1:
         raise ValueError(f"Race name cannot be verified (labels={list(labels)[:4]}, candidates={sorted(names)[:5]})")
     venue_matches = [v for v in VENUES if re.search(rf"{v}競馬場", text[:2000])]
