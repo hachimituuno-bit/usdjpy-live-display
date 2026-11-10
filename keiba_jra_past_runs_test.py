@@ -164,28 +164,25 @@ def parse_distance(value):
 
 
 def parse_surface(value):
+    """Parse JRA going; keep compound conditions intact (e.g. 良/稍重)."""
     value = clean(value)
+    conditions = ("稍重", "不良", "良", "重")
+    token = r"(?:稍重|不良|良|重)"
+    condition_pattern = rf"{token}(?:\s*[/／・]\s*{token})*"
 
-    if value in ("良", "稍重", "重", "不良"):
-        return None, value
+    # Track condition without surface prefix; surface comes from distance field.
+    if re.fullmatch(condition_pattern, value):
+        return None, re.sub(r"\s+", "", value)
 
+    # Surface label may be prefixed; preserve the compound going string.
     match = re.fullmatch(
-        r"(芝|ダート|ダ|障害)"
-        r"(?:[・\s]*(良|稍重|重|不良))?",
+        rf"(芝ダ|芝・ダ|芝/ダ|芝|ダート|ダ|障害)(?:[・\s]*({condition_pattern}))?",
         value,
     )
-
     if match is None:
-        raise ValueError(
-            f"Unexpected surface: {value}"
-        )
-
+        raise ValueError(f"Unexpected surface: {value}")
     surface_text, condition = match.groups()
-
-    return (
-        SURFACE_MAP[surface_text],
-        condition,
-    )
+    return SURFACE_MAP[surface_text], re.sub(r"\s+", "", condition) if condition else None
 
 
 def parse_finish(value, field_size):
