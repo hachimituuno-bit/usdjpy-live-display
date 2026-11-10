@@ -11,6 +11,7 @@ import argparse
 import json
 from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 
 def read_json(path):
@@ -36,7 +37,16 @@ def rank(entries, history):
     seen_numbers, seen_ids = set(), set()
     ranked = []
     for entry in entries['horses']:
-        number, name, cid = entry['number'], entry['name'], entry['identity_candidate']
+        number, name = entry['number'], entry['name']
+        cid = entry.get('identity_candidate')
+        if cid is None and entry.get('horse_url'):
+            parsed = urlparse(entry['horse_url'])
+            if parsed.scheme != 'https' or parsed.hostname != 'www.jra.go.jp' or parsed.path != '/JRADB/accessU.html':
+                raise ValueError(f'{name}: invalid JRA horse URL')
+            candidates = parse_qs(parsed.query).get('CNAME', [])
+            if len(candidates) != 1:
+                raise ValueError(f'{name}: invalid JRA CNAME')
+            cid = candidates[0]
         if type(number) is not int or number < 1 or not name or not cid:
             raise ValueError('Invalid entrant')
         if number in seen_numbers or cid in seen_ids:
