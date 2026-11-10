@@ -1,0 +1,38 @@
+name: KEIBA next JRA race ranking (manual only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      entries_file:
+        description: 'Confirmed race-card JSON path in repository'
+        required: true
+        default: 'keiba_next_entries.json'
+      history_file:
+        description: 'Historical runs JSON for the SAME entrants'
+        required: true
+        default: 'keiba_next_history.json'
+
+permissions:
+  contents: read
+
+jobs:
+  next-race-ranking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Pre-race ranking (no posting)
+        env:
+          ENTRIES_FILE: ${{ inputs.entries_file }}
+          HISTORY_FILE: ${{ inputs.history_file }}
+        run: |
+          python keiba_next_race.py --entries "$ENTRIES_FILE" --history "$HISTORY_FILE"
+      - name: Upload ranking
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-next-race-ranking
+          path: keiba_next_race_ranking.json
+          if-no-files-found: error
