@@ -1,5 +1,5 @@
 
-"""Test extraction of past runs from one JRA horse page.
+"""Test extraction of past runs from JRA horse pages.
 
 Manual read-only test.
 No predictions, email, or Blogger posting.
@@ -156,8 +156,6 @@ def parse_distance(value):
 def parse_surface(value):
     value = clean(value)
 
-    # Surface and track condition may be
-    # displayed together in some layouts.
     if value in ("良", "稍重", "重", "不良"):
         return None, value
 
@@ -212,12 +210,31 @@ def find_history_table(soup):
     return candidates[0]
 
 
-def extract_runs(soup, target_date, max_runs):
+def extract_runs(
+    soup,
+    target_date,
+    max_runs,
+    horse_name=TARGET_HORSE,
+):
+    """Extract past runs for the specified horse."""
+
     text = check_error_page(soup)
 
-    if TARGET_HORSE not in text:
+    if not isinstance(horse_name, str):
         raise ValueError(
-            "Target horse name not found"
+            "Invalid horse name"
+        )
+
+    horse_name = horse_name.strip()
+
+    if not horse_name:
+        raise ValueError(
+            "Horse name is empty"
+        )
+
+    if horse_name not in text:
+        raise ValueError(
+            f"Horse name not found: {horse_name}"
         )
 
     table = find_history_table(soup)
@@ -427,12 +444,11 @@ def main():
         horse_url,
     )
 
-    check_error_page(horse_soup)
-
     runs, available = extract_runs(
         horse_soup,
         target_date,
         args.max_runs,
+        horse_name=TARGET_HORSE,
     )
 
     result = {
