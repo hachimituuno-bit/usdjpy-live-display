@@ -1,16 +1,15 @@
-name: KEIBA JRA rolling race discovery (no posting)
+name: KEIBA JRA Friday prediction and Blogger post
 
 on:
   schedule:
-    # Every Friday 18:15 JST = Friday 09:15 UTC
-    - cron: '15 9 * * 5'
+    - cron: '15 9 * * 5' # Friday 18:15 JST
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # Only to persist keiba_published_races.json
 
 concurrency:
-  group: keiba-rolling-races
+  group: keiba-friday-blogger
   cancel-in-progress: false
 
 jobs:
@@ -19,6 +18,8 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -32,6 +33,25 @@ jobs:
             python keiba_friday_or_manual.py --mode manual
           else
             python keiba_friday_or_manual.py --mode scheduled
+          fi
+      - name: Blogger posting (scheduled Fridays only)
+        if: github.event_name == 'schedule'
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          BLOGGER_POST_EMAIL: ${{ secrets.BLOGGER_POST_EMAIL }}
+        run: python keiba_blogger_publish.py --mode scheduled
+      - name: Persist sent-race ledger
+        if: github.event_name == 'schedule'
+        run: |
+          if git status --porcelain -- keiba_published_races.json | grep -q .; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add keiba_published_races.json
+            git commit -m 'Record JRA Blogger email submissions'
+            git push
           fi
       - name: Upload rankings and backtest reports
         if: always()
