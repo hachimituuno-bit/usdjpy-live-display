@@ -51,13 +51,24 @@ def metadata(page_html, today):
     race_day = date(*map(int, m.groups()))
     if not today <= race_day <= today + timedelta(days=35):
         raise ValueError("Not an upcoming race within 35 days")
-    title = soup.find("h1")
-    if not title:
-        raise ValueError("Official race name heading missing")
-    name = re.sub(r"\s+", "", title.get_text(" ", strip=True))
-    name = re.sub(r"^第\d+回", "", name)
-    if not name or name == "出馬表":
-        raise ValueError("Race name cannot be verified")
+    # JRA often uses generic h1 headings such as "出馬表". Try page title
+    # and social metadata, but accept only a recognizable race-name pattern.
+    sources = []
+    for tag in soup.find_all(["h1", "h2", "title"]):
+        sources.append(tag.get_text(" ", strip=True))
+    for tag in soup.find_all("meta"):
+        if tag.get("property") in ("og:title", "twitter:title") or tag.get("name") == "description":
+            sources.append(tag.get("content", ""))
+    sources.append(text[:1000])
+    names = []
+    race_pattern = re.compile(r"(?:第\s*\d+\s*回\s*)?([ァ-ヶー・A-Za-z0-9ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+(?:ステークス|カップ|記念|賞|マイル|ダービー|優駿牝馬|天皇賞|菊花賞|皐月賞|有馬記念|ジャパンカップ))")
+    for source in sources:
+        for match in race_pattern.finditer(source):
+            names.append(match.group(1))
+    unique_names = sorted(set(names))
+    if len(unique_names) != 1:
+        raise ValueError(f"Race name cannot be verified (candidates={unique_names[:5]})")
+    name = unique_names[0]
     venue_matches = [v for v in VENUES if re.search(rf"{v}競馬場", text[:1200])]
     if len(venue_matches) != 1:
         raise ValueError("Cannot establish unique venue")
