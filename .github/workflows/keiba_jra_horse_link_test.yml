@@ -1,0 +1,40 @@
+
+name: KEIBA JRA horse link TEST (manual only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  horse-link-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install requests beautifulsoup4
+
+      - name: Inspect JRA horse links
+        run: |
+          python keiba_jra_horse_link_test.py \
+            --output keiba_horse_links_test.json
+
+      - name: Upload link inspection results
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-jra-horse-links-test
+          path: keiba_horse_links_test.json
+          retention-days: 1
+          if-no-files-found: error
