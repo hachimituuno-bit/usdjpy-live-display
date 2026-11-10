@@ -11,7 +11,6 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
-from keiba_auto_run import discover
 from keiba_next_entries_fetch import parse_entries
 from keiba_next_collect import collect
 from keiba_next_race import rank
@@ -117,6 +116,51 @@ def metadata(page_html, today, labels=()):
     return race_day, venue_matches.pop(), name
 
 
+def discover_official_card(session, intro_html, intro_url, day, venue, race_name):
+    """Find a card through actual official links, not a fabricated JRADB URL.
+
+    The race introduction may have no card link before publication. Check the
+    official JRA race menu as an alternative, but require race identity on the
+    fetched card before returning it. Ambiguity fails closed.
+    """
+    pages = [(intro_url, intro_html)]
+    for url in ("https://www.jra.go.jp/keiba/", "https://www.jra.go.jp/"):
+        try:
+            pages.append((url, fetch(session, url)))
+        except requests.RequestException as exc:
+            print(f"INFO: official menu unavailable {url}: {exc}", flush=True)
+    links = set()
+    for page_url, html in pages:
+        soup = BeautifulSoup(html, "html.parser")
+        for a in soup.find_all("a", href=True):
+            url = urljoin(page_url, a["href"])
+            parsed = urlparse(url)
+            if (parsed.scheme == "https" and parsed.hostname == "www.jra.go.jp"
+                    and parsed.path == "/JRADB/accessD.html" and parsed.query):
+                links.add(url)
+    verified = []
+    for url in sorted(links):
+        try:
+            html = fetch(session, url)
+            soup = BeautifulSoup(html, "html.parser")
+            heading = " ".join(t.get_text(" ", strip=True) for t in soup.find_all(["h1", "h2", "h3", "title"]))
+            compact = re.sub(r"\s+", "", heading)
+            # Never infer identity from the introduction page or a menu label.
+            if race_name not in compact or venue not in compact:
+                continue
+            # The date must also be present in the card's own heading.
+            date_patterns = (f"{day.year}年{day.month}月{day.day}日",
+                             f"{day.month}月{day.day}日")
+            if not any(x in compact for x in date_patterns):
+                continue
+            verified.append((url, html))
+        except requests.RequestException:
+            continue
+    if len(verified) != 1:
+        raise ValueError(f"Official race-card link not uniquely verified (linked={len(links)}, verified={len(verified)}); wait for publication")
+    return verified[0]
+
+
 def card_race_number(card_html, venue, race_name):
     """Read a race number from the official race card, never from a guess."""
     soup = BeautifulSoup(card_html, "html.parser")
@@ -199,8 +243,7 @@ def main():
                 continue
             # Never manufacture a race-card URL from a race-introduction URL.
             # The official page must link directly to a unique JRADB card.
-            card_url = discover(page, url)
-            card = fetch(session, card_url)
+            card_url, card = discover_official_card(session, page, url, day, venue, name)
             count = card_row_count(card)
             number = card_race_number(card, venue, name)
             entries = parse_entries(card, card_url, day.isoformat(), venue, number, name, count)
