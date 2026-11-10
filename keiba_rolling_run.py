@@ -117,28 +117,34 @@ def metadata(page_html, today, labels=()):
     return race_day, venue_matches.pop(), name
 
 
-def calendar_race_number(session, day, venue, race_name):
-    url = f"https://www.jra.go.jp/keiba/calendar{day.year}/{day.year}/{day.month:02d}/{day.month:02d}{day.day:02d}.html"
-    html = fetch(session, url)
-    soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text(" ", strip=True)
-    # Split venue blocks; a name/number must be found in the correct venue block.
-    pattern = re.compile(r"(?:\d+回)?(" + "|".join(VENUES) + r")\d+日")
-    blocks = list(pattern.finditer(text))
-    matches = []
-    norm_name = re.sub(r"\s+", "", race_name).replace("（", "(").replace("）", ")")
-    for i, block in enumerate(blocks):
-        if block.group(1) != venue:
+def card_race_number(card_html, venue, race_name):
+    """Read a race number from the official race card, never from a guess."""
+    soup = BeautifulSoup(card_html, "html.parser")
+    # The card must identify the expected race; do not accept a bare 11R
+    # from a navigation menu or another race on the same page.
+    norm = lambda s: re.sub(r"\s+", "", s).replace("（", "(").replace("）", ")")
+    expected = norm(race_name)
+    blocks = []
+    for tag in soup.find_all(["h1", "h2", "h3", "title"]):
+        blocks.append(tag.get_text(" ", strip=True))
+    for tag in soup.find_all("meta"):
+        if tag.get("property") in ("og:title", "twitter:title"):
+            blocks.append(tag.get("content", ""))
+    for tag in soup.select("main, article, [role='main']"):
+        blocks.append(tag.get_text(" ", strip=True)[:1200])
+    matches = set()
+    for block in blocks:
+        compact = norm(block)
+        if expected not in compact:
             continue
-        segment = text[block.end():blocks[i+1].start() if i+1<len(blocks) else len(text)]
-        for m in re.finditer(r"(\d{1,2})レース\s*(.*?)(?=\d{1,2}レース|$)", segment):
-            num, desc = int(m.group(1)), m.group(2)
-            compact = re.sub(r"\s+", "", desc).replace("（", "(").replace("）", ")")
-            if norm_name in compact and 1 <= num <= 12:
-                matches.append(num)
+        # Keep the number local to the race name to avoid navigation links.
+        at = compact.find(expected)
+        nearby = compact[max(0, at-100):at+len(expected)+100]
+        for m in re.finditer(r"(?<!\d)(1[0-2]|[1-9])\s*(?:R|レース)(?!\d)", nearby, re.I):
+            matches.add(int(m.group(1)))
     if len(matches) != 1:
-        raise ValueError(f"Cannot verify unique race number on JRA calendar: {url}")
-    return matches[0]
+        raise ValueError(f"Cannot verify unique race number from official card (found={sorted(matches)})")
+    return matches.pop()
 
 
 def card_row_count(html):
@@ -191,12 +197,12 @@ def main():
             if "公開予定" in BeautifulSoup(page, "html.parser").get_text(" ", strip=True):
                 print("WAIT: card not yet published", flush=True)
                 continue
-            number = calendar_race_number(session, day, venue, name)
             # Never manufacture a race-card URL from a race-introduction URL.
             # The official page must link directly to a unique JRADB card.
             card_url = discover(page, url)
             card = fetch(session, card_url)
             count = card_row_count(card)
+            number = card_race_number(card, venue, name)
             entries = parse_entries(card, card_url, day.isoformat(), venue, number, name, count)
             # Save per-race outputs; prevent one race overwriting another.
             folder = Path("keiba_rolling_results") / f"{day.isoformat()}_{venue}_{number:02d}R"
