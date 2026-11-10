@@ -1,0 +1,39 @@
+
+name: KEIBA JRA result fetch TEST (manual only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: python -m pip install requests beautifulsoup4
+
+      - name: Fetch JRA historical race result
+        run: |
+          python keiba_jra_result_fetch.py \
+            --url "https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1005202605021120261108/00" \
+            --output jra_result_test.json
+
+      - name: Upload test result
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-jra-result-test
+          path: jra_result_test.json
+          retention-days: 1
