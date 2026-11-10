@@ -27,11 +27,11 @@ jobs:
       - name: Fetch JRA historical race result
         run: |
           python keiba_jra_result_fetch.py \
-            --url "https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1005202605021120261108/00" \
+            --url "https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1005202605021020261108/4B" \
             --output jra_result_test.json \
             --race-date 2026-11-08 \
-            --surface turf \
-            --distance-m 2500
+            --surface dirt \
+            --distance-m 1600
 
       - name: Upload test result
         if: success()
