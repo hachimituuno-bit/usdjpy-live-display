@@ -57,6 +57,13 @@ SURFACE_MAP = {
     "障害": "jump",
 }
 
+FINISH_STATUS_MAP = {
+    "除外": "excluded",
+    "取消": "scratched",
+    "中止": "did_not_finish",
+    "失格": "disqualified",
+}
+
 
 def clean(value):
     return re.sub(
@@ -175,6 +182,30 @@ def parse_surface(value):
     return (
         SURFACE_MAP[surface_text],
         condition,
+    )
+
+
+def parse_finish(value, field_size):
+    """Return numeric finish and its status."""
+
+    value = clean(value)
+
+    if re.fullmatch(r"\d+", value):
+        finish = int(value)
+
+        if not 1 <= finish <= field_size:
+            raise ValueError(
+                "Finish outside field size: "
+                f"{finish} / {field_size}"
+            )
+
+        return finish, "finished"
+
+    if value in FINISH_STATUS_MAP:
+        return None, FINISH_STATUS_MAP[value]
+
+    raise ValueError(
+        f"Unexpected finish status: {value}"
     )
 
 
@@ -304,15 +335,10 @@ def extract_runs(
             "field size",
         )
 
-        finish = parse_positive_int(
+        finish, finish_status = parse_finish(
             values[7],
-            "finish",
+            field_size,
         )
-
-        if finish > field_size:
-            raise ValueError(
-                "Finish exceeds field size"
-            )
 
         if not venue or not race_name:
             raise ValueError(
@@ -328,6 +354,8 @@ def extract_runs(
             "track_condition": track_condition,
             "field_size": field_size,
             "finish": finish,
+            "finish_status": finish_status,
+            "finish_raw": values[7],
             "corner_positions": None,
             "source": "jra_horse_page",
         })
