@@ -46,7 +46,7 @@ DATE_PATTERN = re.compile(
 )
 
 DISTANCE_PATTERN = re.compile(
-    r"^(芝|ダート|ダ|障害)\s*"
+    r"^(芝ダ|芝・ダ|芝/ダ|芝|ダート|ダ|障害)\s*"
     r"([\d,，]+)(?:m|メートル)?$"
 )
 
@@ -55,6 +55,9 @@ SURFACE_MAP = {
     "ダート": "dirt",
     "ダ": "dirt",
     "障害": "jump",
+    "芝ダ": "jump",
+    "芝・ダ": "jump",
+    "芝/ダ": "jump",
 }
 
 FINISH_STATUS_MAP = {
