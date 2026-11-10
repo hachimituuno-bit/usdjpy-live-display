@@ -80,10 +80,41 @@ def metadata(page_html, today, labels=()):
             names.add(candidate)
     if len(names) != 1:
         raise ValueError(f"Race name cannot be verified (labels={list(labels)[:4]}, candidates={sorted(names)[:5]})")
-    venue_matches = [v for v in VENUES if re.search(rf"{v}競馬場", text[:2000])]
+    name = names.pop()
+    # Navigation/footer lists all ten JRA venues. Never inspect the entire page
+    # for a venue: use race-specific metadata or the closest race-title block.
+    race_sources = []
+    for tag in soup.find_all(["h1", "h2", "h3", "title"]):
+        race_sources.append(tag.get_text(" ", strip=True))
+    for tag in soup.find_all("meta"):
+        if tag.get("property") in ("og:title", "twitter:title") or tag.get("name") == "description":
+            race_sources.append(tag.get("content", ""))
+    # Explicit venue in the race-specific heading/title is strongest evidence.
+    venue_matches = set()
+    for source in race_sources:
+        if name in re.sub(r"\s+", "", source):
+            venue_matches.update(v for v in VENUES if re.search(rf"{v}競馬場", source))
     if len(venue_matches) != 1:
-        raise ValueError(f"Cannot establish unique venue (found={venue_matches})")
-    return race_day, venue_matches[0], names.pop()
+        # Try a small context around the named race within the main article,
+        # excluding global navigation and unrelated race listings.
+        for region in soup.select("main, article, [role='main']"):
+            for node in region.find_all(string=True):
+                if name not in str(node):
+                    continue
+                parent = node.parent
+                for _ in range(3):
+                    if parent is None or parent == region:
+                        break
+                    nearby = parent.get_text(" ", strip=True)
+                    if len(nearby) <= 450:
+                        found = {v for v in VENUES if re.search(rf"{v}競馬場", nearby)}
+                        if len(found) == 1:
+                            venue_matches.update(found)
+                            break
+                    parent = parent.parent
+    if len(venue_matches) != 1:
+        raise ValueError(f"Cannot establish unique venue from race-specific context (found={sorted(venue_matches)})")
+    return race_day, venue_matches.pop(), name
 
 
 def calendar_race_number(session, day, venue, race_name):
