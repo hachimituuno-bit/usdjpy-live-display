@@ -1,0 +1,50 @@
+
+name: KEIBA JRA horse history TEST (manual only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  horse-history-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install requests beautifulsoup4
+
+      - name: Fetch historical race results
+        run: |
+          python keiba_jra_batch_fetch.py \
+            --output-dir keiba_jra_results
+
+      - name: Build horse histories
+        run: |
+          python keiba_jra_horse_history.py \
+            --input-dir keiba_jra_results \
+            --target-date 2026-11-10 \
+            --max-runs 5 \
+            --output keiba_horse_history.json
+
+      - name: Upload test data
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-jra-history-test
+          path: |
+            keiba_jra_results/
+            keiba_horse_history.json
+          retention-days: 1
+          if-no-files-found: error
