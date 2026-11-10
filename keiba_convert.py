@@ -51,6 +51,36 @@ def _time(value):
     return t
 
 
+def infer_running_style(recent_runs):
+    """Estimate style from the last corner of each of 3–5 past races.
+
+    corner_positions is an ordered, nonempty list of integer passing positions;
+    its last element is the final corner. Thresholds are provisional.
+    """
+    if not isinstance(recent_runs, list) or not 3 <= len(recent_runs) <= 5:
+        raise InputError('脚質推定には過去3〜5走が必要です')
+    relative_positions = []
+    for run in recent_runs:
+        if not isinstance(run, dict):
+            raise InputError('recent_runs はオブジェクトの配列です')
+        field = _int(run, 'field_size', 2, 30)
+        corners = run.get('corner_positions')
+        if not isinstance(corners, list) or not corners:
+            raise InputError('corner_positions は最終コーナーを含む整数配列が必要です')
+        for position in corners:
+            if type(position) is not int or not 1 <= position <= field:
+                raise InputError('コーナー順位は1〜出走頭数の整数が必要です')
+        relative_positions.append((corners[-1] - 1) / (field - 1))
+    average = sum(relative_positions) / len(relative_positions)
+    if average <= 0.20:
+        return 'front'
+    if average <= 0.45:
+        return 'press'
+    if average <= 0.75:
+        return 'stalker'
+    return 'closer'
+
+
 def score_horse(horse, race, day):
     runs = horse.get('recent_runs')
     if not isinstance(runs, list) or not 3 <= len(runs) <= 5:
@@ -87,7 +117,21 @@ def score_horse(horse, race, day):
     # Distance similarity + race performance, based ONLY on supplied past races.
     course_distance = sum((result * .8 + (1 - gap / 500) * 100 * .2) for result, gap in relevant) / len(relevant)
     scenario = _str(race, 'pace_scenario')
-    style = _str(horse, 'running_style')
+    # Infer only when every supplied run contains corner positions.
+    # Otherwise retain the original manual style; never fabricate missing data.
+    for run in runs:
+        if 'corner_positions' in run:
+            corners = run['corner_positions']
+            field = _int(run, 'field_size', 2, 30)
+            if not isinstance(corners, list) or not corners:
+                raise InputError('corner_positions は最終コーナーを含む整数配列が必要です')
+            for position in corners:
+                if type(position) is not int or not 1 <= position <= field:
+                    raise InputError('コーナー順位は1〜出走頭数の整数が必要です')
+    if all('corner_positions' in run for run in runs):
+        style = infer_running_style(runs)
+    else:
+        style = _str(horse, 'running_style')
     if scenario not in PACE_FIT or style not in PACE_FIT[scenario]:
         raise InputError('pace_scenario: fast/average/slow, running_style: front/press/stalker/closer')
     return {'recent_form_rating': round(recent, 2), 'course_distance_rating': round(course_distance, 2), 'pace_rating': float(PACE_FIT[scenario][style])}
@@ -156,7 +200,7 @@ def convert(raw, expected_day, demo=False):
             'distance_m': race['distance_m'], 'horses': converted,
             'editorial_priority': race.get('editorial_priority', 0),
             'ratings_method': ('直近3〜5走の相対着順（時系列加重）、同馬場・距離±400m成績、'
-                               '入力された展開シナリオと脚質の適合度による固定ヒューリスティック。'
+                               '入力された展開シナリオと脚質（全走のコーナー順位があれば推定）の適合度による固定ヒューリスティック。'
                                '近走45％／距離35％／展開20％。勝率ではありません。')
         })
     result = {'date': expected_day, 'synthetic_demo': demo, 'data_asof': asof.isoformat(),
