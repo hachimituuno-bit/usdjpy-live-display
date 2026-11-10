@@ -1,0 +1,137 @@
+{
+  "date": "2026-11-08",
+  "venue": "京都",
+  "race_number": 12,
+  "race_name": "3歳以上1勝クラス",
+  "source_type": "user_saved_jra_race_results_html",
+  "data_status": "historical_results_not_pre_race",
+  "win_odds_available": false,
+  "horses": [
+    {
+      "number": 1,
+      "name": "コスモレッド",
+      "finish_position": 15,
+      "win_popularity_rank": 14,
+      "win_odds": null
+    },
+    {
+      "number": 2,
+      "name": "モルティフレーバー",
+      "finish_position": 17,
+      "win_popularity_rank": 6,
+      "win_odds": null
+    },
+    {
+      "number": 3,
+      "name": "メイショウハッケイ",
+      "finish_position": 14,
+      "win_popularity_rank": 8,
+      "win_odds": null
+    },
+    {
+      "number": 4,
+      "name": "エグジスタンス",
+      "finish_position": 4,
+      "win_popularity_rank": 11,
+      "win_odds": null
+    },
+    {
+      "number": 5,
+      "name": "キシャール",
+      "finish_position": 3,
+      "win_popularity_rank": 1,
+      "win_odds": null
+    },
+    {
+      "number": 6,
+      "name": "ブルズアイプリンス",
+      "finish_position": 11,
+      "win_popularity_rank": 17,
+      "win_odds": null
+    },
+    {
+      "number": 7,
+      "name": "アラビアンジョイ",
+      "finish_position": 8,
+      "win_popularity_rank": 3,
+      "win_odds": null
+    },
+    {
+      "number": 8,
+      "name": "ダノンブランニュー",
+      "finish_position": 12,
+      "win_popularity_rank": 9,
+      "win_odds": null
+    },
+    {
+      "number": 9,
+      "name": "ナクソス",
+      "finish_position": 9,
+      "win_popularity_rank": 18,
+      "win_odds": null
+    },
+    {
+      "number": 10,
+      "name": "ニシノトリビュート",
+      "finish_position": 6,
+      "win_popularity_rank": 5,
+      "win_odds": null
+    },
+    {
+      "number": 11,
+      "name": "サリュエ",
+      "finish_position": 5,
+      "win_popularity_rank": 12,
+      "win_odds": null
+    },
+    {
+      "number": 12,
+      "name": "ジャンヌローサ",
+      "finish_position": 1,
+      "win_popularity_rank": 13,
+      "win_odds": null
+    },
+    {
+      "number": 13,
+      "name": "タイガーロード",
+      "finish_position": 7,
+      "win_popularity_rank": 16,
+      "win_odds": null
+    },
+    {
+      "number": 14,
+      "name": "スウィッチインラヴ",
+      "finish_position": 10,
+      "win_popularity_rank": 7,
+      "win_odds": null
+    },
+    {
+      "number": 15,
+      "name": "クールフラン",
+      "finish_position": 18,
+      "win_popularity_rank": 15,
+      "win_odds": null
+    },
+    {
+      "number": 16,
+      "name": "メイクワンズデイ",
+      "finish_position": 16,
+      "win_popularity_rank": 2,
+      "win_odds": null
+    },
+    {
+      "number": 17,
+      "name": "スマッシング",
+      "finish_position": 13,
+      "win_popularity_rank": 10,
+      "win_odds": null
+    },
+    {
+      "number": 18,
+      "name": "フロンティエール",
+      "finish_position": 2,
+      "win_popularity_rank": 4,
+      "win_odds": null
+    }
+  ]
+}
