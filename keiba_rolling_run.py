@@ -131,15 +131,24 @@ def discover_official_card(session, intro_html, intro_url, day, venue, race_name
     card_url = f"https://www.jra.go.jp/keiba/race/{match.group(1)}/syutsuba.html"
     card_html = intro_html if parsed.path.endswith("/syutsuba.html") else fetch(session, card_url)
     soup = BeautifulSoup(card_html, "html.parser")
-    headings = " ".join(t.get_text(" ", strip=True) for t in soup.find_all(["h1", "h2", "h3", "title"]))
-    compact = re.sub(r"\s+", "", headings)
-    if race_name not in compact or venue not in compact:
-        raise ValueError("Official syutsuba page race name or venue mismatch")
-    if not any(d in compact for d in (f"{day.year}年{day.month}月{day.day}日", f"{day.month}月{day.day}日")):
-        raise ValueError("Official syutsuba page date mismatch")
+    # A pre-publication page can omit the venue/date/race heading entirely.
+    # Classify that state BEFORE checking identity, but never treat it as a card.
     body = soup.get_text(" ", strip=True)
-    if re.search(r"出馬表.{0,100}公開予定|出馬表.{0,100}公開していません", body):
+    compact_body = re.sub(r"\s+", "", body)
+    if re.search(r"出馬表.{0,120}(?:公開予定|公開していません|公開前)", compact_body):
         raise ValueError("Official syutsuba page not yet published")
+
+    # Only race-specific title/headings and descriptive metadata are identity
+    # evidence; site-wide navigation and unrelated race links are excluded.
+    sources = [t.get_text(" ", strip=True) for t in soup.find_all(["h1", "h2", "h3", "title"])]
+    for tag in soup.find_all("meta"):
+        if tag.get("property") in ("og:title", "twitter:title") or tag.get("name") == "description":
+            sources.append(tag.get("content", ""))
+    compact = re.sub(r"\s+", "", " ".join(sources))
+    if race_name not in compact or venue not in compact:
+        raise ValueError("Official syutsuba page race name or venue not verifiable")
+    if not any(d in compact for d in (f"{day.year}年{day.month}月{day.day}日", f"{day.month}月{day.day}日")):
+        raise ValueError("Official syutsuba page date not verifiable")
     # Downstream validation still requires exactly one complete horse table,
     # a verified race number, and fully parseable entries.
     return card_url, card_html
@@ -213,7 +222,14 @@ def main():
             candidates.append((day, venue, name, url, page))
         except (ValueError, requests.RequestException) as e:
             print(f"SKIP {url}: {e}", flush=True)
-    candidates.sort(key=lambda c: (c[0], c[1], c[2]))
+    # Intro and syutsuba links for the same race must be processed only once.
+    unique = {}
+    for candidate in candidates:
+        day, venue, name, url, page = candidate
+        key = (day, venue, name)
+        if key not in unique or (url.endswith("/syutsuba.html") and not unique[key][3].endswith("/syutsuba.html")):
+            unique[key] = candidate
+    candidates = sorted(unique.values(), key=lambda c: (c[0], c[1], c[2]))
     if not candidates:
         print("WAIT: no future featured races verified from JRA homepage")
         return 0
