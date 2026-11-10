@@ -1,7 +1,7 @@
 
 """Test extraction of past runs from one JRA horse page.
 
-Manual, read-only test.
+Manual read-only test.
 No predictions, email, or Blogger posting.
 """
 
@@ -10,10 +10,9 @@ import json
 import re
 from datetime import date
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import requests
-from bs4 import BeautifulSoup
 
 from keiba_jra_horse_page_test import (
     RACE_URL,
@@ -23,31 +22,61 @@ from keiba_jra_horse_page_test import (
     get_page,
 )
 
-DATE_RE = re.compile(
-    r"(\d{4})[年./](\d{1,2})[月./](\d{1,2})日?"
+
+EXPECTED_HEADERS = [
+    "年月日",
+    "場",
+    "レース名",
+    "距離",
+    "馬場",
+    "頭数",
+    "人気",
+    "着順",
+    "騎手名",
+    "負担重量",
+    "馬体重",
+    "タイム",
+    "Rt",
+    "1着馬（2着馬）",
+]
+
+DATE_PATTERN = re.compile(
+    r"^(\d{4})[年./](\d{1,2})[月./]"
+    r"(\d{1,2})日?$"
 )
 
-DISTANCE_RE = re.compile(
-    r"(芝|ダート|障害)\s*([\d,，]+)"
+DISTANCE_PATTERN = re.compile(
+    r"^(芝|ダート|ダ|障害)\s*"
+    r"([\d,，]+)(?:m|メートル)?$"
 )
 
-ERROR_TEXT = (
-    "パラメータエラー",
-    "ご指定のページが見つかりませんでした",
-    "エラー013",
-)
+SURFACE_MAP = {
+    "芝": "turf",
+    "ダート": "dirt",
+    "ダ": "dirt",
+    "障害": "jump",
+}
 
 
 def clean(value):
-    return re.sub(r"\s+", " ", value).strip()
+    return re.sub(
+        r"\s+", " ", value
+    ).strip()
 
 
-def parse_date(value):
-    match = DATE_RE.search(clean(value))
+def normalize_header(value):
+    return re.sub(
+        r"\s+", "", value
+    ).strip()
 
-    if not match:
+
+def parse_race_date(value):
+    value = clean(value)
+    match = DATE_PATTERN.fullmatch(value)
+
+    if match is None:
         raise ValueError(
-            f"Unrecognized race date: {value}"
+            f"Unexpected date format: {value}"
         )
 
     year, month, day = map(
@@ -55,35 +84,6 @@ def parse_date(value):
     )
 
     return date(year, month, day)
-
-
-def parse_course(value):
-    value = clean(value)
-    match = DISTANCE_RE.search(value)
-
-    if not match:
-        raise ValueError(
-            f"Unrecognized course: {value}"
-        )
-
-    surface_ja, distance_text = match.groups()
-
-    surface = {
-        "芝": "turf",
-        "ダート": "dirt",
-        "障害": "jump",
-    }[surface_ja]
-
-    distance_m = int(
-        distance_text.replace(",", "").replace("，", "")
-    )
-
-    if not 800 <= distance_m <= 5000:
-        raise ValueError(
-            f"Invalid distance: {distance_m}"
-        )
-
-    return surface, distance_m
 
 
 def parse_positive_int(value, label):
@@ -94,41 +94,118 @@ def parse_positive_int(value, label):
             f"Invalid {label}: {value}"
         )
 
-    result = int(value)
+    number = int(value)
 
-    if result < 1:
+    if number < 1:
         raise ValueError(
             f"Invalid {label}: {value}"
         )
 
-    return result
+    return number
+
+
+def parse_distance(value):
+    value = clean(value)
+
+    match = DISTANCE_PATTERN.fullmatch(value)
+
+    if match is not None:
+        surface_text, distance_text = (
+            match.groups()
+        )
+
+        distance = int(
+            distance_text.replace(
+                ",", ""
+            ).replace("，", "")
+        )
+
+        surface_hint = SURFACE_MAP[
+            surface_text
+        ]
+
+    elif re.fullmatch(
+        r"[\d,，]+(?:m|メートル)?",
+        value,
+    ):
+        distance_text = re.sub(
+            r"(?:m|メートル)$", "", value
+        )
+
+        distance = int(
+            distance_text.replace(
+                ",", ""
+            ).replace("，", "")
+        )
+
+        surface_hint = None
+
+    else:
+        raise ValueError(
+            f"Unexpected distance: {value}"
+        )
+
+    if not 800 <= distance <= 5000:
+        raise ValueError(
+            f"Distance out of range: {distance}"
+        )
+
+    return distance, surface_hint
+
+
+def parse_surface(value):
+    value = clean(value)
+
+    # Surface and track condition may be
+    # displayed together in some layouts.
+    if value in ("良", "稍重", "重", "不良"):
+        return None, value
+
+    match = re.fullmatch(
+        r"(芝|ダート|ダ|障害)"
+        r"(?:[・\s]*(良|稍重|重|不良))?",
+        value,
+    )
+
+    if match is None:
+        raise ValueError(
+            f"Unexpected surface: {value}"
+        )
+
+    surface_text, condition = match.groups()
+
+    return (
+        SURFACE_MAP[surface_text],
+        condition,
+    )
 
 
 def find_history_table(soup):
     candidates = []
 
+    expected = [
+        normalize_header(value)
+        for value in EXPECTED_HEADERS
+    ]
+
     for table in soup.find_all("table"):
-        headers = [
-            clean(th.get_text(" ", strip=True))
-            for th in table.find_all("th")
-        ]
+        for tr in table.find_all("tr"):
+            headers = [
+                normalize_header(
+                    th.get_text(" ", strip=True)
+                )
+                for th in tr.find_all(
+                    "th", recursive=False
+                )
+            ]
 
-        header_text = " ".join(headers)
-
-        if all(
-            word in header_text
-            for word in (
-                "年月日",
-                "競馬場",
-                "距離",
-                "着順",
-            )
-        ):
-            candidates.append(table)
+            if headers == expected:
+                candidates.append(table)
+                break
 
     if len(candidates) != 1:
         raise ValueError(
-            "Expected exactly one history table; "
+            "Expected one JRA history table; "
             f"found {len(candidates)}"
         )
 
@@ -136,12 +213,7 @@ def find_history_table(soup):
 
 
 def extract_runs(soup, target_date, max_runs):
-    text = soup.get_text(" ", strip=True)
-
-    if any(word in text for word in ERROR_TEXT):
-        raise ValueError(
-            "JRA returned an error page"
-        )
+    text = check_error_page(soup)
 
     if TARGET_HORSE not in text:
         raise ValueError(
@@ -150,42 +222,65 @@ def extract_runs(soup, target_date, max_runs):
 
     table = find_history_table(soup)
 
-    rows = table.find_all("tr")
     extracted = []
+    data_rows = 0
 
-    for tr in rows:
+    for tr in table.find_all("tr"):
         cells = tr.find_all(
-            "td",
-            recursive=False,
+            "td", recursive=False
         )
 
         if not cells:
             continue
 
         values = [
-            clean(cell.get_text(" ", strip=True))
+            clean(
+                cell.get_text(" ", strip=True)
+            )
             for cell in cells
         ]
 
-        # Require the expected 14-column format.
         if len(values) != 14:
             raise ValueError(
                 "Unexpected history row columns: "
                 f"{len(values)} / {values}"
             )
 
-        race_date = parse_date(values[0])
+        data_rows += 1
 
-        # Never include the target date or later.
+        race_date = parse_race_date(
+            values[0]
+        )
+
         if race_date >= target_date:
             continue
 
         venue = values[1]
         race_name = values[2]
 
-        surface, distance_m = parse_course(
-            values[3]
+        distance_m, distance_surface = (
+            parse_distance(values[3])
         )
+
+        surface, track_condition = (
+            parse_surface(values[4])
+        )
+
+        if surface is None:
+            if distance_surface is None:
+                raise ValueError(
+                    "Race surface cannot be determined"
+                )
+
+            surface = distance_surface
+
+        elif (
+            distance_surface is not None
+            and surface != distance_surface
+        ):
+            raise ValueError(
+                "Distance and surface disagree"
+            )
 
         field_size = parse_positive_int(
             values[5],
@@ -213,15 +308,21 @@ def extract_runs(soup, target_date, max_runs):
             "race_name": race_name,
             "surface": surface,
             "distance_m": distance_m,
+            "track_condition": track_condition,
             "field_size": field_size,
             "finish": finish,
             "corner_positions": None,
             "source": "jra_horse_page",
         })
 
+    if data_rows == 0:
+        raise ValueError(
+            "History table contains no data rows"
+        )
+
     if not extracted:
         raise ValueError(
-            "No valid historical runs found"
+            "No historical runs before target date"
         )
 
     extracted.sort(
@@ -229,7 +330,36 @@ def extract_runs(soup, target_date, max_runs):
         reverse=True,
     )
 
-    return extracted[:max_runs], len(extracted)
+    dates = [
+        run["date"] for run in extracted
+    ]
+
+    if len(dates) != len(set(dates)):
+        raise ValueError(
+            "Duplicate race dates found; "
+            "manual verification required"
+        )
+
+    return (
+        extracted[:max_runs],
+        len(extracted),
+    )
+
+
+def validate_horse_url(url):
+    parsed = urlparse(url)
+
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "www.jra.go.jp"
+        or parsed.path != "/JRADB/accessU.html"
+        or not parse_qs(
+            parsed.query
+        ).get("CNAME")
+    ):
+        raise ValueError(
+            "Unexpected JRA horse information URL"
+        )
 
 
 def main():
@@ -255,14 +385,24 @@ def main():
 
     if not 1 <= args.max_runs <= 5:
         parser.error(
-            "--max-runs must be between 1 and 5"
+            "--max-runs must be 1 to 5"
         )
 
-    target_date = date.fromisoformat(
-        args.target_date
-    )
+    try:
+        target_date = date.fromisoformat(
+            args.target_date
+        )
+    except ValueError:
+        parser.error(
+            "Invalid target date; use YYYY-MM-DD"
+        )
 
     session = requests.Session()
+
+    print(
+        "Fetching JRA race result",
+        flush=True,
+    )
 
     race_soup = get_page(
         session,
@@ -275,16 +415,12 @@ def main():
         race_soup
     )
 
-    parsed = urlparse(horse_url)
+    validate_horse_url(horse_url)
 
-    if (
-        parsed.scheme != "https"
-        or parsed.hostname != "www.jra.go.jp"
-        or parsed.path != "/JRADB/accessU.html"
-    ):
-        raise ValueError(
-            "Unexpected horse information URL"
-        )
+    print(
+        "Fetching JRA horse information",
+        flush=True,
+    )
 
     horse_soup = get_page(
         session,
@@ -309,14 +445,16 @@ def main():
         "runs": runs,
         "posting": False,
         "note": (
-            "Historical runs extracted for testing. "
-            "Horse identity and race row mapping "
-            "require further verification. "
-            "Corner positions are not yet collected."
+            "Manual test only. "
+            "Horse identity and race data "
+            "require source verification. "
+            "Corner positions are not collected."
         ),
     }
 
-    Path(args.output).write_text(
+    output_path = Path(args.output)
+
+    output_path.write_text(
         json.dumps(
             result,
             ensure_ascii=False,
@@ -328,6 +466,7 @@ def main():
     print(
         f"OK: {TARGET_HORSE} / "
         f"{len(runs)} past runs / "
+        f"{available} available / "
         "no posting",
         flush=True,
     )
