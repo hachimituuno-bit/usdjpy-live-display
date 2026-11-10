@@ -32,47 +32,54 @@ def fetch(session, url):
 
 
 def featured_urls(home_html):
+    """Collect candidate URLs together with their actual JRA link labels."""
     soup = BeautifulSoup(home_html, "html.parser")
-    urls = set()
+    found = {}
     for a in soup.find_all("a", href=True):
         u = urljoin(HOME, a["href"])
         p = urlparse(u)
-        if p.scheme == "https" and p.hostname in ("www.jra.go.jp", "jra.jp", "own.jra.jp") and RACE_LINK.fullmatch(p.path):
-            urls.add("https://www.jra.go.jp" + p.path)
-    return sorted(urls)
+        if p.scheme != "https" or p.hostname not in ("www.jra.go.jp", "jra.jp"):
+            continue
+        if not RACE_LINK.fullmatch(p.path):
+            continue
+        canonical = "https://www.jra.go.jp" + p.path
+        label = re.sub(r"\s+", "", a.get_text(" ", strip=True))
+        found.setdefault(canonical, set()).add(label)
+    return [(url, sorted(labels)) for url, labels in sorted(found.items())]
 
 
-def metadata(page_html, today):
+def metadata(page_html, today, labels=()):
     soup = BeautifulSoup(page_html, "html.parser")
     text = soup.get_text(" ", strip=True)
     m = DATE_RE.search(text)
     if not m:
-        raise ValueError("Official race date not found")
+        raise ValueError("Official race date not found (may be a race introduction page)")
     race_day = date(*map(int, m.groups()))
     if not today <= race_day <= today + timedelta(days=35):
         raise ValueError("Not an upcoming race within 35 days")
-    # JRA often uses generic h1 headings such as "出馬表". Try page title
-    # and social metadata, but accept only a recognizable race-name pattern.
-    sources = []
-    for tag in soup.find_all(["h1", "h2", "title"]):
+    sources = list(labels)
+    for tag in soup.find_all(["h1", "h2", "h3", "title"]):
         sources.append(tag.get_text(" ", strip=True))
     for tag in soup.find_all("meta"):
         if tag.get("property") in ("og:title", "twitter:title") or tag.get("name") == "description":
             sources.append(tag.get("content", ""))
-    sources.append(text[:1000])
-    names = []
-    race_pattern = re.compile(r"(?:第\s*\d+\s*回\s*)?([ァ-ヶー・A-Za-z0-9ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+(?:ステークス|カップ|記念|賞|マイル|ダービー|優駿牝馬|天皇賞|菊花賞|皐月賞|有馬記念|ジャパンカップ))")
+    sources.append(text[:1200])
+    # Match a full race title, including Japanese names (e.g. 天皇賞, 菊花賞).
+    race_pattern = re.compile(
+        r"(?:第\s*\d+\s*回\s*)?"
+        r"([一-龥々ァ-ヶー・A-Za-z0-9ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+?"
+        r"(?:ステークス|カップ|記念|大賞典|ダービー|優駿牝馬|天皇賞|菊花賞|皐月賞|有馬記念|ジャパンカップ))"
+    )
+    names = set()
     for source in sources:
         for match in race_pattern.finditer(source):
-            names.append(match.group(1))
-    unique_names = sorted(set(names))
-    if len(unique_names) != 1:
-        raise ValueError(f"Race name cannot be verified (candidates={unique_names[:5]})")
-    name = unique_names[0]
-    venue_matches = [v for v in VENUES if re.search(rf"{v}競馬場", text[:1200])]
+            names.add(match.group(1))
+    if len(names) != 1:
+        raise ValueError(f"Race name cannot be verified (labels={list(labels)[:4]}, candidates={sorted(names)[:5]})")
+    venue_matches = [v for v in VENUES if re.search(rf"{v}競馬場", text[:2000])]
     if len(venue_matches) != 1:
-        raise ValueError("Cannot establish unique venue")
-    return race_day, venue_matches[0], name
+        raise ValueError(f"Cannot establish unique venue (found={venue_matches})")
+    return race_day, venue_matches[0], names.pop()
 
 
 def calendar_race_number(session, day, venue, race_name):
@@ -130,10 +137,10 @@ def main():
     urls = featured_urls(fetch(session, HOME))
     print(f"DISCOVERY: {len(urls)} featured race-card pages", flush=True)
     candidates = []
-    for url in urls:
+    for url, labels in urls:
         try:
             page = fetch(session, url)
-            day, venue, name = metadata(page, today)
+            day, venue, name = metadata(page, today, labels)
             candidates.append((day, venue, name, url, page))
         except (ValueError, requests.RequestException) as e:
             print(f"SKIP {url}: {e}", flush=True)
@@ -150,13 +157,9 @@ def main():
                 print("WAIT: card not yet published", flush=True)
                 continue
             number = calendar_race_number(session, day, venue, name)
-            card_page_url = re.sub(r"/syutsuba\.html$", ".html", url)
-            card_page_url = re.sub(r"\.html$", "/syutsuba.html", card_page_url)
-            card_page = fetch(session, card_page_url)
-            if "公開予定" in BeautifulSoup(card_page, "html.parser").get_text(" ", strip=True):
-                print("WAIT: official race card not published", flush=True)
-                continue
-            card_url = discover(card_page, card_page_url)
+            # Never manufacture a race-card URL from a race-introduction URL.
+            # The official page must link directly to a unique JRADB card.
+            card_url = discover(page, url)
             card = fetch(session, card_url)
             count = card_row_count(card)
             entries = parse_entries(card, card_url, day.isoformat(), venue, number, name, count)
