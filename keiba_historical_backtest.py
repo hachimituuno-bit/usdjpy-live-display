@@ -10,12 +10,49 @@ from urllib.parse import urljoin, urlparse, parse_qs
 import requests
 from bs4 import BeautifulSoup
 from keiba_jra_result_fetch import extract
-from keiba_safe_historical_entries import historical_entries
 from keiba_next_collect import collect
 from keiba_next_race import rank
 from keiba_jra_batch_fetch import RACES
 
 OUT = Path('keiba_backtest_results')
+
+def historical_entries(html, url, actual):
+    soup = BeautifulSoup(html, 'html.parser')
+    tables = []
+    for table in soup.find_all('table'):
+        headers = ' '.join(th.get_text(' ', strip=True) for th in table.find_all('th'))
+        if all(word in headers for word in ('着順', '馬名', 'コーナー')):
+            tables.append(table)
+    if len(tables) != 1:
+        raise ValueError('Cannot identify unique result table')
+    horses = []
+    for tr in tables[0].find_all('tr'):
+        cells = tr.find_all('td', recursive=False)
+        if len(cells) < 10 or not re.fullmatch(r'\d+', cells[0].get_text(' ', strip=True)):
+            continue
+        number = int(cells[2].get_text(' ', strip=True))
+        name_cell = cells[3]
+        name = name_cell.get_text(' ', strip=True)
+        links = []
+        for a in name_cell.find_all('a', href=True):
+            u = urljoin(url, a['href'])
+            p = urlparse(u)
+            if p.hostname == 'www.jra.go.jp' and p.path == '/JRADB/accessU.html' and parse_qs(p.query).get('CNAME'):
+                links.append(u)
+        if len(links) != 1:
+            raise ValueError(f'{name}: horse profile URL not unique')
+        # The ranking module matches entrants to histories by JRA CNAME.
+        # Derive it from the same validated official profile URL as collect().
+        identity_candidate = parse_qs(urlparse(links[0]).query)['CNAME'][0]
+        horses.append({'number': number, 'name': name,
+                       'horse_url': links[0],
+                       'identity_candidate': identity_candidate})
+    actual_horses = {(h['number'], h['name']) for h in actual['horses']}
+    if len(horses) != actual['field_size'] or {(h['number'], h['name']) for h in horses} != actual_horses:
+        raise ValueError('Entrants do not match official result table')
+    return {'race_date': actual['date'], 'venue': 'historical_JRA', 'race_number': 1,
+            'race_name': 'historical_backtest', 'posting': False, 'horses': horses,
+            'warning': 'Retrospective entrants sourced from result page, NOT a pre-race card'}
 
 def load_races(path):
     if path is None:

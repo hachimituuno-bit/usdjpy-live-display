@@ -160,62 +160,121 @@ def extract(url, html):
         )
 
     rows = []
+
     for tr in result_table.find_all('tr'):
-        cells = tr.find_all('td', recursive=False)
+        cells = tr.find_all(
+            'td', recursive=False
+        )
+
         if not cells:
             continue
-        vals = [cell.get_text(' ', strip=True) for cell in cells]
+
+        vals = [
+            cell.get_text(' ', strip=True)
+            for cell in cells
+        ]
+
+        if not re.fullmatch(r'\d+', vals[0]):
+            continue
+
         if len(vals) < 10:
-            # Header/subheading rows are not runners.
-            continue
-        status = vals[0]
-        if not (re.fullmatch(r'\d+', status) or status in ('中止', '失格', '除外', '取消')):
-            continue
-        # 取消/除外 are non-starters and must not count in the starting field.
-        if status in ('除外', '取消'):
-            continue
-        if not re.fullmatch(r'\d+', vals[2]):
-            raise ValueError('Invalid horse number')
-        number = int(vals[2])
+            raise ValueError(
+                'レース結果表の列数が想定外です'
+            )
+
+        finish = int(vals[0])
+
+        number = (
+            int(vals[2])
+            if re.fullmatch(r'\d+', vals[2])
+            else None
+        )
+
         name = vals[3]
-        if not name:
-            raise ValueError('Missing horse name')
         corners_text = vals[9]
-        if corners_text and not re.fullmatch(r'\d+(?:\s+\d+)*', corners_text):
-            raise ValueError(f'Invalid corner positions for {number}: {corners_text!r}')
-        corners = [int(n) for n in corners_text.split()] if corners_text else []
-        finish = int(status) if re.fullmatch(r'\d+', status) else None
-        if finish is not None and not corners:
-            raise ValueError('Finished horse has no corner positions')
-        rows.append({'number': number, 'name': name, 'finish': finish,
-                     'finish_status': 'finished' if finish is not None else status,
-                     'corner_positions': corners})
+
+        if (
+            number is None
+            or not name
+            or not re.fullmatch(
+                r'\d+(?:\s+\d+)*',
+                corners_text
+            )
+        ):
+            raise ValueError(
+                '馬番・馬名・コーナー順位の'
+                '読み取りに失敗しました'
+            )
+
+        corners = [
+            int(n) for n in corners_text.split()
+        ]
+
+        rows.append({
+            'number': number,
+            'name': name,
+            'finish': finish,
+            'corner_positions': corners
+        })
+
     field = len(rows)
+
     if not 2 <= field <= 30:
-        raise ValueError('Starting field size outside supported range')
-    if len({row['number'] for row in rows}) != field:
-        raise ValueError('Duplicate horse number')
-    ordered = sorted(row['finish'] for row in rows if row['finish'] is not None)
-    if not ordered or ordered[0] != 1:
-        raise ValueError('Cannot identify first place')
-    # Allow official dead heats; do not fabricate a finish for non-finishers.
+        raise ValueError(
+            '出走頭数が対応範囲外です'
+        )
+
+    if len({
+        row['number'] for row in rows
+    }) != field:
+        raise ValueError('馬番が重複しています')
+
+    # JRA results may contain dead heats (e.g. 1, 2, 2, 4).
+    # Competition ranking: a tie at place p occupying k slots means
+    # the next distinct place is p+k. Do not renumber official finishes.
+    ordered_finishes = sorted(row['finish'] for row in rows)
     expected = 1
-    i = 0
-    while i < len(ordered):
-        observed = ordered[i]
+    index = 0
+    while index < field:
+        observed = ordered_finishes[index]
         if observed != expected:
-            raise ValueError(f'Invalid official finish sequence: {ordered}')
-        tied = ordered.count(observed)
-        expected += tied
-        i += tied
+            raise ValueError(
+                f'着順が不正です: 期待順位={expected}, 実際={observed}, '
+                f'着順一覧={ordered_finishes}'
+            )
+        tied_count = ordered_finishes.count(observed)
+        expected += tied_count
+        index += tied_count
+
     for row in rows:
-        if not all(1 <= pos <= field for pos in row['corner_positions']):
-            raise ValueError('コーナー順位が出走頭数の範囲外です')
+        if not row['corner_positions']:
+            raise ValueError(
+                'コーナー順位がありません'
+            )
+
+        if not all(
+            1 <= position <= field
+            for position in row['corner_positions']
+        ):
+            raise ValueError(
+                'コーナー順位が出走頭数の範囲外です'
+            )
+
         row['field_size'] = field
-    return {'source_url': url, 'date': race_date, 'surface': surface,
-            'distance_m': distance_m, 'metadata_source': 'jra_page_parsed',
-            'field_size': field, 'horses': rows,
-            'note': 'Official post-race results for retrospective evaluation only; no posting'}
+
+    return {
+        'source_url': url,
+        'date': race_date,
+        'surface': surface,
+        'distance_m': distance_m,
+        'metadata_source': 'jra_page_parsed',
+        'field_size': field,
+        'horses': rows,
+        'note': (
+            'JRA公式レース結果ページから取得。'
+            '予想対象レースの結果には使用しない。'
+        )
+    }
 
 
 def main():
