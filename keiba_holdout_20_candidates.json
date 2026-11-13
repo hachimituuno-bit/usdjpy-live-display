@@ -1,0 +1,166 @@
+{
+  "purpose": "holdout_validation_candidates",
+  "note": "JRA race-program candidates; result URLs and final surface/distance must be verified before running. Do not append directly to keiba_races.json.",
+  "races": [
+    {
+      "id": "nakayama_20260926_06r",
+      "date": "2026-09-26",
+      "venue": "nakayama",
+      "race_number": 6,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "nakayama_20260926_07r",
+      "date": "2026-09-26",
+      "venue": "nakayama",
+      "race_number": 7,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "nakayama_20260926_08r",
+      "date": "2026-09-26",
+      "venue": "nakayama",
+      "race_number": 8,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "nakayama_20260926_10r",
+      "date": "2026-09-26",
+      "venue": "nakayama",
+      "race_number": 10,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "nakayama_20260926_11r",
+      "date": "2026-09-26",
+      "venue": "nakayama",
+      "race_number": 11,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "hanshin_20260926_06r",
+      "date": "2026-09-26",
+      "venue": "hanshin",
+      "race_number": 6,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "hanshin_20260926_07r",
+      "date": "2026-09-26",
+      "venue": "hanshin",
+      "race_number": 7,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "hanshin_20260926_08r",
+      "date": "2026-09-26",
+      "venue": "hanshin",
+      "race_number": 8,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "hanshin_20260926_10r",
+      "date": "2026-09-26",
+      "venue": "hanshin",
+      "race_number": 10,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "hanshin_20260926_11r",
+      "date": "2026-09-26",
+      "venue": "hanshin",
+      "race_number": 11,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "nakayama_20260927_06r",
+      "date": "2026-09-27",
+      "venue": "nakayama",
+      "race_number": 6,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "nakayama_20260927_07r",
+      "date": "2026-09-27",
+      "venue": "nakayama",
+      "race_number": 7,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "nakayama_20260927_08r",
+      "date": "2026-09-27",
+      "venue": "nakayama",
+      "race_number": 8,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "nakayama_20260927_10r",
+      "date": "2026-09-27",
+      "venue": "nakayama",
+      "race_number": 10,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "nakayama_20260927_11r",
+      "date": "2026-09-27",
+      "venue": "nakayama",
+      "race_number": 11,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "hanshin_20260927_07r",
+      "date": "2026-09-27",
+      "venue": "hanshin",
+      "race_number": 7,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "hanshin_20260927_08r",
+      "date": "2026-09-27",
+      "venue": "hanshin",
+      "race_number": 8,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "hanshin_20260927_09r",
+      "date": "2026-09-27",
+      "venue": "hanshin",
+      "race_number": 9,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "hanshin_20260927_10r",
+      "date": "2026-09-27",
+      "venue": "hanshin",
+      "race_number": 10,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    },
+    {
+      "id": "hanshin_20260927_11r",
+      "date": "2026-09-27",
+      "venue": "hanshin",
+      "race_number": 11,
+      "official_result_url": null,
+      "verification_status": "result_url_pending"
+    }
+  ]
+}
