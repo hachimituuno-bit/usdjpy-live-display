@@ -1,0 +1,28 @@
+name: Keiba Complete Historical Backtest (Manual Only)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install requests beautifulsoup4
+      - name: Compile changed files
+        run: |
+          python -m py_compile keiba_jra_result_fetch.py keiba_safe_historical_entries.py keiba_historical_backtest.py keiba_historical_backtest_metrics.py keiba_surface_sensitivity.py
+      - name: Run historical backtest (no publishing)
+        run: python keiba_historical_backtest.py
+      - name: Upload reports even if incomplete
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-historical-backtest-reports
+          path: keiba_backtest_results/
+          if-no-files-found: warn
