@@ -1,0 +1,199 @@
+{
+  "purpose": "holdout_validation_candidates",
+  "note": "11 of 20 JRA official result pages identified. Nine remain pending. NOT a complete 20-race runnable dataset.",
+  "races": [
+    {
+      "id": "nakayama_20260926_06r",
+      "date": "2026-09-26",
+      "venue": "nakayama",
+      "race_number": 6,
+      "official_result_url": null,
+      "verification_status": "pending_official_result_verification"
+    },
+    {
+      "id": "nakayama_20260926_07r",
+      "date": "2026-09-26",
+      "venue": "nakayama",
+      "race_number": 7,
+      "official_result_url": null,
+      "verification_status": "verified_official_result",
+      "url": "https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1006202604080720260926/B1",
+      "surface": "turf",
+      "distance_m": 2000
+    },
+    {
+      "id": "nakayama_20260926_08r",
+      "date": "2026-09-26",
+      "venue": "nakayama",
+      "race_number": 8,
+      "official_result_url": null,
+      "verification_status": "verified_official_result",
+      "url": "https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1006202604080820260926/66",
+      "surface": "dirt",
+      "distance_m": 1200
+    },
+    {
+      "id": "nakayama_20260926_10r",
+      "date": "2026-09-26",
+      "venue": "nakayama",
+      "race_number": 10,
+      "official_result_url": null,
+      "verification_status": "verified_official_result",
+      "url": "https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde0106202604081020260926/31",
+      "surface": "turf",
+      "distance_m": 1200
+    },
+    {
+      "id": "nakayama_20260926_11r",
+      "date": "2026-09-26",
+      "venue": "nakayama",
+      "race_number": 11,
+      "official_result_url": null,
+      "verification_status": "verified_official_result",
+      "url": "https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde0106202604081120260926/E6",
+      "surface": "turf",
+      "distance_m": 1600
+    },
+    {
+      "id": "hanshin_20260926_06r",
+      "date": "2026-09-26",
+      "venue": "hanshin",
+      "race_number": 6,
+      "official_result_url": null,
+      "verification_status": "verified_official_result",
+      "url": "https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1009202604080620260926/DA",
+      "surface": "dirt",
+      "distance_m": 1800
+    },
+    {
+      "id": "hanshin_20260926_07r",
+      "date": "2026-09-26",
+      "venue": "hanshin",
+      "race_number": 7,
+      "official_result_url": null,
+      "verification_status": "pending_official_result_verification"
+    },
+    {
+      "id": "hanshin_20260926_08r",
+      "date": "2026-09-26",
+      "venue": "hanshin",
+      "race_number": 8,
+      "official_result_url": null,
+      "verification_status": "pending_official_result_verification"
+    },
+    {
+      "id": "hanshin_20260926_10r",
+      "date": "2026-09-26",
+      "venue": "hanshin",
+      "race_number": 10,
+      "official_result_url": null,
+      "verification_status": "pending_official_result_verification"
+    },
+    {
+      "id": "hanshin_20260926_11r",
+      "date": "2026-09-26",
+      "venue": "hanshin",
+      "race_number": 11,
+      "official_result_url": null,
+      "verification_status": "pending_official_result_verification"
+    },
+    {
+      "id": "nakayama_20260927_06r",
+      "date": "2026-09-27",
+      "venue": "nakayama",
+      "race_number": 6,
+      "official_result_url": null,
+      "verification_status": "verified_official_result",
+      "url": "https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1006202604090620260927/2C",
+      "surface": "dirt",
+      "distance_m": 1800
+    },
+    {
+      "id": "nakayama_20260927_07r",
+      "date": "2026-09-27",
+      "venue": "nakayama",
+      "race_number": 7,
+      "official_result_url": null,
+      "verification_status": "verified_official_result",
+      "url": "https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde0106202604090720260927/02",
+      "surface": "turf",
+      "distance_m": 1600
+    },
+    {
+      "id": "nakayama_20260927_08r",
+      "date": "2026-09-27",
+      "venue": "nakayama",
+      "race_number": 8,
+      "official_result_url": null,
+      "verification_status": "pending_official_result_verification"
+    },
+    {
+      "id": "nakayama_20260927_10r",
+      "date": "2026-09-27",
+      "venue": "nakayama",
+      "race_number": 10,
+      "official_result_url": null,
+      "verification_status": "pending_official_result_verification"
+    },
+    {
+      "id": "nakayama_20260927_11r",
+      "date": "2026-09-27",
+      "venue": "nakayama",
+      "race_number": 11,
+      "official_result_url": null,
+      "verification_status": "verified_official_result",
+      "url": "https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1006202604091120260927/F5",
+      "surface": "turf",
+      "distance_m": 1200
+    },
+    {
+      "id": "hanshin_20260927_07r",
+      "date": "2026-09-27",
+      "venue": "hanshin",
+      "race_number": 7,
+      "official_result_url": null,
+      "verification_status": "verified_official_result",
+      "url": "https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1009202604090720260927/BF",
+      "surface": "dirt",
+      "distance_m": 1400
+    },
+    {
+      "id": "hanshin_20260927_08r",
+      "date": "2026-09-27",
+      "venue": "hanshin",
+      "race_number": 8,
+      "official_result_url": null,
+      "verification_status": "pending_official_result_verification"
+    },
+    {
+      "id": "hanshin_20260927_09r",
+      "date": "2026-09-27",
+      "venue": "hanshin",
+      "race_number": 9,
+      "official_result_url": null,
+      "verification_status": "verified_official_result",
+      "url": "https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde0109202604090920260927/4A",
+      "surface": "turf",
+      "distance_m": 2400
+    },
+    {
+      "id": "hanshin_20260927_10r",
+      "date": "2026-09-27",
+      "venue": "hanshin",
+      "race_number": 10,
+      "official_result_url": null,
+      "verification_status": "pending_official_result_verification"
+    },
+    {
+      "id": "hanshin_20260927_11r",
+      "date": "2026-09-27",
+      "venue": "hanshin",
+      "race_number": 11,
+      "official_result_url": null,
+      "verification_status": "verified_official_result",
+      "url": "https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1009202604091120260927/D3",
+      "surface": "turf",
+      "distance_m": 1600
+    }
+  ]
+}
