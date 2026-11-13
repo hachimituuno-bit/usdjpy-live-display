@@ -1,0 +1,9 @@
+[
+  {"id":"tokyo_20261108_10r","url":"https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1005202605021020261108/4B","date":"2026-11-08","surface":"dirt","distance_m":1600},
+  {"id":"tokyo_20261108_11r","url":"https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1005202605021120261108/00","date":"2026-11-08","surface":"turf","distance_m":2500},
+  {"id":"tokyo_20261107_05r","url":"https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1005202605010520261107/52","date":"2026-11-07","surface":"dirt","distance_m":1600},
+  {"id":"tokyo_20261107_08r","url":"https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1005202605010820261107/71","date":"2026-11-07","surface":"turf","distance_m":2000},
+  {"id":"tokyo_20261107_10r","url":"https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1005202605011020261107/1B","date":"2026-11-07","surface":"turf","distance_m":2000},
+  {"id":"fukushima_20261107_11r","url":"https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde0103202603011120261107/FB","date":"2026-11-07","surface":"turf","distance_m":1200},
+  {"id":"fukushima_20261108_08r","url":"https://www.jra.go.jp/JRADB/accessS.html?CNAME=pw01sde1003202603020820261108/AB","date":"2026-11-08","surface":"dirt","distance_m":1150}
+]
