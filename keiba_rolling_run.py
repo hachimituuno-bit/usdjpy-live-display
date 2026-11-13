@@ -240,6 +240,7 @@ def main():
     if not candidates:
         print("WAIT: no verified future JRA race card; no prediction fabricated", flush=True)
         return 0
+    successes = 0
     for day, venue, number, name, count, url, html in candidates:
         key = f"{day.isoformat()}_{venue}_{number:02d}R"
         print(f"CHECK {key} {name}", flush=True)
@@ -254,10 +255,13 @@ def main():
             for filename, payload in (("entries.json", entries), ("history.json", history), ("ranking.json", ranking)):
                 (folder / filename).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             print(f"SUCCESS PRELIMINARY {key}: {count} horses; NO POSTING", flush=True)
-            return 0
+            successes += 1
         except (ValueError, KeyError, IndexError, TypeError, requests.RequestException) as exc:
             print(f"SAFE SKIP {key}: {type(exc).__name__}: {exc}", flush=True)
-    print("WAIT: no safely processable race card; no prediction fabricated", flush=True)
+    if successes:
+        print(f"LIVE_PRELIMINARY_SUCCESS: {successes}/{len(candidates)} future race rankings generated; NO POSTING", flush=True)
+    else:
+        print("WAIT: no safely processable race card; no prediction fabricated", flush=True)
     return 0
 
 
