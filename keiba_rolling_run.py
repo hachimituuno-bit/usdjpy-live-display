@@ -71,6 +71,39 @@ def card_links(html, source_url):
     return sorted(found)
 
 
+def navigation_diagnostics(html, source_url, depth):
+    """Report public JRA navigation markup without guessing a target URL."""
+    soup = BeautifulSoup(html, "html.parser")
+    links = card_links(html, source_url)
+    anchors = soup.find_all("a")
+    href_cnames = []
+    action_samples = []
+    for a in anchors:
+        href = a.get("href", "")
+        onclick = a.get("onclick", "")
+        if "CNAME" in href or "accessD.html" in href:
+            href_cnames.append(href[:180])
+        if onclick and ("action" in onclick.lower() or "CNAME" in onclick):
+            action_samples.append(onclick[:180])
+    forms = soup.find_all("form")
+    scripts = soup.find_all("script")
+    script_hits = sum(bool(re.search(r"doAction|CNAME|accessD\.html", x.get_text(" ", strip=True), re.I)) for x in scripts)
+    print(f"NAV PAGE depth={depth} url={source_url}", flush=True)
+    print(f"NAV MARKUP anchors={len(anchors)} forms={len(forms)} scripts={len(scripts)} "
+          f"navigation_scripts={script_hits} extracted_links={len(links)}", flush=True)
+    for form in forms[:3]:
+        print(f"NAV FORM method={form.get('method', 'GET')} action={form.get('action', '')[:180]}", flush=True)
+    for link in links[:12]:
+        print(f"NAV LINK {link}", flush=True)
+    for href in href_cnames[:5]:
+        print(f"NAV HREF SAMPLE {href}", flush=True)
+    for action in action_samples[:5]:
+        print(f"NAV ONCLICK SAMPLE {action}", flush=True)
+    if not links:
+        print("NAV BLOCKED: no matching links extracted from this page; URL discovery needs inspection", flush=True)
+    return links
+
+
 def card_details(html):
     """Verify one card's race identity and count from its own horse table caption."""
     soup = BeautifulSoup(html, "html.parser")
@@ -168,7 +201,7 @@ def discover(session, today):
                     print(f"VERIFIED CARD {day} {venue}{number}R {name} {count} horses", flush=True)
             continue
         if depth < MAX_DEPTH:
-            for target in card_links(html, url):
+            for target in navigation_diagnostics(html, url, depth):
                 if target not in seen:
                     queue.append((target, depth + 1))
     print(f"DISCOVERY: {len(seen)} official pages inspected; {len(cards)} matching cards", flush=True)
