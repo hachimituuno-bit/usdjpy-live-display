@@ -25,7 +25,7 @@ ACTION_RE = re.compile(r"doAction\(\s*['\"](/JRADB/access[DI]\.html)['\"]\s*,\s*
 RACE_LINK = re.compile(r"^/keiba/race/\d+(?:/syutsuba\.html|\.html)$")
 NAME_RE = re.compile(r"(?:第\s*\d+\s*回\s*)?([一-龥々ァ-ヶー・A-Za-z0-9ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+?(?:ステークス|カップ|記念|大賞典|ダービー|優駿牝馬|天皇賞|菊花賞|皐月賞|有馬記念|ジャパンカップ))")
 MAX_PAGES = 85
-MAX_DEPTH = 3
+MAX_DEPTH = 4
 
 
 def norm(value):
@@ -33,7 +33,16 @@ def norm(value):
 
 
 def fetch(session, url):
-    response = session.get(url, timeout=20)
+    """Follow observed JRA links. doAction uses POST cname; ordinary href uses GET."""
+    parsed = urlparse(url)
+    if parsed.fragment == "jra-post":
+        values = parse_qs(parsed.query).get("CNAME", [])
+        if len(values) != 1:
+            raise ValueError("JRA POST requires exactly one observed CNAME")
+        endpoint = parsed._replace(query="", fragment="").geturl()
+        response = session.post(endpoint, data={"cname": values[0]}, timeout=20)
+    else:
+        response = session.get(url, timeout=20)
     response.raise_for_status()
     response.encoding = response.apparent_encoding
     return response.text
@@ -61,7 +70,7 @@ def card_links(html, source_url):
             for path, cname in actions:
                 target = "https://www.jra.go.jp" + path + "?CNAME=" + quote(cname, safe="/")
                 if official_card_url(target):
-                    found.add(target)
+                    found.add(target + "#jra-post")
             continue
         href = a.get("href")
         if href:
@@ -175,7 +184,7 @@ def discover(session, today):
         return []
     # The index is an official entry point, not itself a horse card.
     # accessI is a navigation page, not evidence of a verified race card.
-    queue = deque([(INDEX, 0)])
+    queue = deque([(INDEX + "#jra-post", 0)])
     seen = set()
     cards = []
     while queue and len(seen) < MAX_PAGES:
