@@ -84,8 +84,19 @@ def rank(entries, history):
                        'form_score': score, 'completed_runs': valid_count,
                        'identity_verified': bool(horse.get('identity_verified', False))})
     ranked.sort(key=lambda h: (h['form_score'] is None, -(h['form_score'] or 0), h['horse_number']))
+    # Competition ranking: equal displayed scores share a rank (1, 1, 3).
+    # Horse number is only a stable display order within a tie.
+    previous_score = object()
+    current_rank = None
     for i, h in enumerate(ranked, 1):
-        h['rank'] = i
+        score = h['form_score']
+        if score is None:
+            h['rank'] = None
+            continue
+        if score != previous_score:
+            current_rank = i
+            previous_score = score
+        h['rank'] = current_rank
     return {'race_date': race_date.isoformat(), 'venue': entries['venue'],
             'race_number': entries['race_number'], 'race_name': entries['race_name'],
             'generated_at': datetime.now().astimezone().isoformat(), 'posting': False,
@@ -104,7 +115,8 @@ def main():
     Path(a.output).write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(f"{result['race_date']} {result['venue']} {result['race_number']}R {result['race_name']}")
     for h in result['horses']:
-        print(f"{h['rank']:>2}. {h['horse_number']:>2} {h['horse_name']} score={h['form_score']} runs={h['completed_runs']}")
+        rank_label = str(h['rank']) if h['rank'] is not None else '-'
+        print(f"{rank_label:>2}. {h['horse_number']:>2} {h['horse_name']} score={h['form_score']} runs={h['completed_runs']}")
     print('COMPLETE / NO POSTING / HISTORICAL FORM ONLY')
 
 
