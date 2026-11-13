@@ -1,0 +1,48 @@
+name: Keiba Holdout 20 Surface Sensitivity (Manual Only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  holdout-sensitivity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests beautifulsoup4
+
+      - name: Check required files
+        run: |
+          test -f keiba_holdout_20_races.json
+          test -f keiba_surface_sensitivity.py
+          test -f keiba_jra_result_fetch.py
+          test -f keiba_historical_backtest.py
+          test -f keiba_next_collect.py
+          test -f keiba_compare_test.py
+
+      - name: Run holdout 20 comparison (no posting)
+        run: |
+          python keiba_surface_sensitivity.py \
+            --races-file keiba_holdout_20_races.json \
+            --output keiba_holdout_20_sensitivity_results.json
+
+      - name: Upload holdout comparison results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-holdout-20-sensitivity-results
+          path: keiba_holdout_20_sensitivity_results.json
+          if-no-files-found: warn
