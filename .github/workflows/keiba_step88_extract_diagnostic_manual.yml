@@ -1,0 +1,25 @@
+name: Keiba Step88 Original Extract Diagnostic (Manual Only)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install requests beautifulsoup4
+      - name: Diagnose existing extract on JRA result (no prediction or posting)
+        run: python keiba_step88_extract_diagnostic_test.py
+      - name: Upload diagnostic JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-step88-extract-diagnostic
+          path: keiba_step88_extract_diagnostic_result.json
+          if-no-files-found: warn
