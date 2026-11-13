@@ -1,0 +1,32 @@
+name: Keiba Nakayama 8R Safe Mapping V5 Regex Fix (Manual Only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  safe-mapping-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository (read only)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install diagnostic dependencies
+        run: python -m pip install requests beautifulsoup4
+      - name: Run standalone diagnostic only
+        run: python -u keiba_nakayama8r_safe_mapping_test_v5_fix.py
+      - name: Upload diagnostic JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-nakayama8r-safe-mapping-v5
+          path: keiba_nakayama8r_safe_mapping_test_v5.json
+          if-no-files-found: warn
