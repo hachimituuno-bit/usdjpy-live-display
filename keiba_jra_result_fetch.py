@@ -8,6 +8,7 @@ Requires: pip install requests beautifulsoup4
 import argparse
 import json
 import re
+import unicodedata
 from datetime import date
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -20,7 +21,7 @@ DATE_PATTERN = re.compile(
     r'(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日'
 )
 COURSE_PATTERN = re.compile(
-    r'コース\s*[：:]\s*([\d,，]+)\s*メートル'
+    r'コース\s*[:：]\s*([\d,，]+)\s*(?:メートル|m|M)'
     r'\s*[（(]\s*(芝|ダート)'
 )
 
@@ -64,7 +65,7 @@ def extract_metadata(soup):
     for element in soup.find_all(
         ['h1', 'h2', 'h3', 'section', 'div', 'table']
     ):
-        text = element.get_text(' ', strip=True)
+        text = unicodedata.normalize('NFKC', element.get_text(' ', strip=True))
 
         if len(text) > 3000:
             continue
@@ -228,12 +229,22 @@ def extract(url, html):
     }) != field:
         raise ValueError('馬番が重複しています')
 
-    if sorted(
-        row['finish'] for row in rows
-    ) != list(range(1, field + 1)):
-        raise ValueError(
-            '着順の重複・欠落があります'
-        )
+    # JRA results may contain dead heats (e.g. 1, 2, 2, 4).
+    # Competition ranking: a tie at place p occupying k slots means
+    # the next distinct place is p+k. Do not renumber official finishes.
+    ordered_finishes = sorted(row['finish'] for row in rows)
+    expected = 1
+    index = 0
+    while index < field:
+        observed = ordered_finishes[index]
+        if observed != expected:
+            raise ValueError(
+                f'着順が不正です: 期待順位={expected}, 実際={observed}, '
+                f'着順一覧={ordered_finishes}'
+            )
+        tied_count = ordered_finishes.count(observed)
+        expected += tied_count
+        index += tied_count
 
     for row in rows:
         if not row['corner_positions']:
