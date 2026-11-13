@@ -21,7 +21,7 @@ HOME = "https://www.jra.go.jp/keiba/thisweek/"
 INDEX = "https://www.jra.go.jp/JRADB/accessD.html?CNAME=pw01dli00/F3"
 VENUES = ("東京", "中山", "京都", "阪神", "中京", "新潟", "福島", "小倉", "札幌", "函館")
 DATE_RE = re.compile(r"(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日")
-ACTION_RE = re.compile(r"doAction\(\s*['\"](/JRADB/accessD\.html)['\"]\s*,\s*['\"]([^'\"]+)['\"]")
+ACTION_RE = re.compile(r"doAction\(\s*['\"](/JRADB/access[DI]\.html)['\"]\s*,\s*['\"]([^'\"]+)['\"]")
 RACE_LINK = re.compile(r"^/keiba/race/\d+(?:/syutsuba\.html|\.html)$")
 NAME_RE = re.compile(r"(?:第\s*\d+\s*回\s*)?([一-龥々ァ-ヶー・A-Za-z0-9ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+?(?:ステークス|カップ|記念|大賞典|ダービー|優駿牝馬|天皇賞|菊花賞|皐月賞|有馬記念|ジャパンカップ))")
 MAX_PAGES = 85
@@ -42,12 +42,12 @@ def fetch(session, url):
 def official_card_url(url):
     p = urlparse(url)
     return (p.scheme == "https" and p.hostname == "www.jra.go.jp"
-            and p.port is None and p.path == "/JRADB/accessD.html"
+            and p.port is None and p.path in ("/JRADB/accessD.html", "/JRADB/accessI.html")
             and len(parse_qs(p.query).get("CNAME", [])) == 1)
 
 
 def card_links(html, source_url):
-    """Read real JRA links, including JavaScript doAction navigation targets.
+    """Read observed JRA accessD/accessI links, including JavaScript doAction targets.
 
     An href ending in # on JRA pages often points BACK to the current page;
     onclick supplies the actual destination. Do not follow the misleading href.
@@ -68,7 +68,7 @@ def card_links(html, source_url):
             target = urljoin(source_url, href).split("#", 1)[0]
             if official_card_url(target):
                 found.add(target)
-    return sorted(found)
+    return sorted(found, key=lambda u: (urlparse(u).path != "/JRADB/accessD.html", u))
 
 
 def navigation_diagnostics(html, source_url, depth):
@@ -81,13 +81,13 @@ def navigation_diagnostics(html, source_url, depth):
     for a in anchors:
         href = a.get("href", "")
         onclick = a.get("onclick", "")
-        if "CNAME" in href or "accessD.html" in href:
+        if "CNAME" in href or "accessD.html" in href or "accessI.html" in href:
             href_cnames.append(href[:180])
         if onclick and ("action" in onclick.lower() or "CNAME" in onclick):
             action_samples.append(onclick[:180])
     forms = soup.find_all("form")
     scripts = soup.find_all("script")
-    script_hits = sum(bool(re.search(r"doAction|CNAME|accessD\.html", x.get_text(" ", strip=True), re.I)) for x in scripts)
+    script_hits = sum(bool(re.search(r"doAction|CNAME|access[DI]\.html", x.get_text(" ", strip=True), re.I)) for x in scripts)
     print(f"NAV PAGE depth={depth} url={source_url}", flush=True)
     print(f"NAV MARKUP anchors={len(anchors)} forms={len(forms)} scripts={len(scripts)} "
           f"navigation_scripts={script_hits} extracted_links={len(links)}", flush=True)
@@ -174,6 +174,7 @@ def discover(session, today):
         print("WAIT: featured race names not verifiable from official links", flush=True)
         return []
     # The index is an official entry point, not itself a horse card.
+    # accessI is a navigation page, not evidence of a verified race card.
     queue = deque([(INDEX, 0)])
     seen = set()
     cards = []
@@ -188,7 +189,7 @@ def discover(session, today):
             print(f"SKIP FETCH {url}: {exc}", flush=True)
             continue
         try:
-            details = card_details(html)
+            details = card_details(html) if urlparse(url).path == "/JRADB/accessD.html" else None
         except ValueError:
             details = None
         if details:
