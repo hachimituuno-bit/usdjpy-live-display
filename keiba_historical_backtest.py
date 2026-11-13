@@ -41,7 +41,12 @@ def historical_entries(html, url, actual):
                 links.append(u)
         if len(links) != 1:
             raise ValueError(f'{name}: horse profile URL not unique')
-        horses.append({'number': number, 'name': name, 'horse_url': links[0]})
+        # The ranking module matches entrants to histories by JRA CNAME.
+        # Derive it from the same validated official profile URL as collect().
+        identity_candidate = parse_qs(urlparse(links[0]).query)['CNAME'][0]
+        horses.append({'number': number, 'name': name,
+                       'horse_url': links[0],
+                       'identity_candidate': identity_candidate})
     actual_horses = {(h['number'], h['name']) for h in actual['horses']}
     if len(horses) != actual['field_size'] or {(h['number'], h['name']) for h in horses} != actual_horses:
         raise ValueError('Entrants do not match official result table')
