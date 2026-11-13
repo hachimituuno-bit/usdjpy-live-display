@@ -1,264 +1,220 @@
-"""Rolling JRA featured-race discovery, safe preliminary form ranking.
+"""Discover official JRA race cards and build provisional historical rankings.
 
-Automatically chooses the earliest *future* featured race with a published card.
-No guessed entrants, dates, horse counts or race names. No posting or wagering.
+No guessed CNAME, no fabricated entries, no publishing. A missing or ambiguous
+card fails closed. Publication remains blocked until independent identity checks
+are implemented in the history collector.
 """
 import json
 import re
 import sys
-from datetime import datetime, timedelta, timezone, date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
+
 import requests
 from bs4 import BeautifulSoup
+
 from keiba_next_entries_fetch import parse_entries
 from keiba_next_collect import collect
 from keiba_next_race import rank
 
 JST = timezone(timedelta(hours=9))
 HOME = "https://www.jra.go.jp/keiba/thisweek/"
+INDEX = "https://www.jra.go.jp/JRADB/accessD.html?CNAME=pw01dli00/F3"
+VENUES = ("東京", "中山", "京都", "阪神", "中京", "新潟", "福島", "小倉", "札幌", "函館")
 RACE_LINK = re.compile(r"^/keiba/race/\d+(?:/syutsuba\.html|\.html)$")
 DATE_RE = re.compile(r"(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日")
-VENUES = ("東京", "中山", "京都", "阪神", "中京", "新潟", "福島", "小倉", "札幌", "函館")
-UNAVAILABLE = ("公開予定", "出馬表は、", "出馬表は、\n")
+ACTION_RE = re.compile(r"doAction\(\s*['\"](/JRADB/accessD\.html)['\"]\s*,\s*['\"]([^'\"]+)['\"]")
 
 
 def fetch(session, url):
-    r = session.get(url, timeout=25)
-    r.raise_for_status()
-    r.encoding = r.apparent_encoding
-    return r.text
+    response = session.get(url, timeout=25)
+    response.raise_for_status()
+    response.encoding = response.apparent_encoding
+    return response.text
 
 
-def featured_urls(home_html):
-    """Collect candidate URLs together with their actual JRA link labels."""
-    soup = BeautifulSoup(home_html, "html.parser")
-    found = {}
-    for a in soup.find_all("a", href=True):
-        u = urljoin(HOME, a["href"])
-        p = urlparse(u)
-        if p.scheme != "https" or p.hostname not in ("www.jra.go.jp", "jra.jp"):
-            continue
-        if not RACE_LINK.fullmatch(p.path):
-            continue
-        canonical = "https://www.jra.go.jp" + p.path
-        label = re.sub(r"\s+", "", a.get_text(" ", strip=True))
-        found.setdefault(canonical, set()).add(label)
-    return [(url, sorted(labels)) for url, labels in sorted(found.items())]
+def normalized(text):
+    return re.sub(r"\s+", "", text or "")
 
 
-def metadata(page_html, today, labels=()):
-    soup = BeautifulSoup(page_html, "html.parser")
-    text = soup.get_text(" ", strip=True)
-    m = DATE_RE.search(text)
-    if not m:
-        raise ValueError("Official race date not found (may be a race introduction page)")
-    race_day = date(*map(int, m.groups()))
-    if not today <= race_day <= today + timedelta(days=35):
-        raise ValueError("Not an upcoming race within 35 days")
-    sources = list(labels)
-    for tag in soup.find_all(["h1", "h2", "h3", "title"]):
-        sources.append(tag.get_text(" ", strip=True))
-    for tag in soup.find_all("meta"):
-        if tag.get("property") in ("og:title", "twitter:title") or tag.get("name") == "description":
-            sources.append(tag.get("content", ""))
-    sources.append(text[:1200])
-    # Match a full race title, including Japanese names (e.g. 天皇賞, 菊花賞).
-    race_pattern = re.compile(
-        r"(?:第\s*\d+\s*回\s*)?"
-        r"([一-龥々ァ-ヶー・A-Za-z0-9ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+?"
-        r"(?:ステークス|カップ|記念|大賞典|ダービー|優駿牝馬|天皇賞|菊花賞|皐月賞|有馬記念|ジャパンカップ))"
-    )
-    names = set()
-    for source in sources:
-        for match in race_pattern.finditer(source):
-            candidate = match.group(1)
-            # Page headings may prefix the race name with the event year.
-            # Normalize only a leading four-digit year followed by 年.
-            candidate = re.sub(r"^20\d{2}年", "", candidate)
-            names.add(candidate)
-    if len(names) != 1:
-        raise ValueError(f"Race name cannot be verified (labels={list(labels)[:4]}, candidates={sorted(names)[:5]})")
-    name = names.pop()
-    # Navigation/footer lists all ten JRA venues. Never inspect the entire page
-    # for a venue: use race-specific metadata or the closest race-title block.
-    race_sources = []
-    for tag in soup.find_all(["h1", "h2", "h3", "title"]):
-        race_sources.append(tag.get_text(" ", strip=True))
-    for tag in soup.find_all("meta"):
-        if tag.get("property") in ("og:title", "twitter:title") or tag.get("name") == "description":
-            race_sources.append(tag.get("content", ""))
-    # Explicit venue in the race-specific heading/title is strongest evidence.
-    venue_matches = set()
-    for source in race_sources:
-        if name in re.sub(r"\s+", "", source):
-            venue_matches.update(v for v in VENUES if re.search(rf"{v}競馬場", source))
-    if len(venue_matches) != 1:
-        # Try a small context around the named race within the main article,
-        # excluding global navigation and unrelated race listings.
-        for region in soup.select("main, article, [role='main']"):
-            for node in region.find_all(string=True):
-                if name not in str(node):
-                    continue
-                parent = node.parent
-                for _ in range(3):
-                    if parent is None or parent == region:
-                        break
-                    nearby = parent.get_text(" ", strip=True)
-                    if len(nearby) <= 450:
-                        found = {v for v in VENUES if re.search(rf"{v}競馬場", nearby)}
-                        if len(found) == 1:
-                            venue_matches.update(found)
-                            break
-                    parent = parent.parent
-    if len(venue_matches) != 1:
-        raise ValueError(f"Cannot establish unique venue from race-specific context (found={sorted(venue_matches)})")
-    return race_day, venue_matches.pop(), name
-
-
-def discover_official_card(session, intro_html, intro_url, day, venue, race_name):
-    """Use the JRA featured race's own official syutsuba page.
-
-    Never treat an unpublished placeholder as a valid horse card. The source
-    URL must be one of the already-verified featured race URLs.
-    """
-    parsed = urlparse(intro_url)
-    if parsed.scheme != "https" or parsed.hostname not in ("www.jra.go.jp", "jra.jp"):
-        raise ValueError("Untrusted race introduction URL")
-    match = re.fullmatch(r"/keiba/race/(\d+)(?:/syutsuba\.html|\.html)", parsed.path)
-    if not match:
-        raise ValueError("Unexpected JRA featured race URL")
-    card_url = f"https://www.jra.go.jp/keiba/race/{match.group(1)}/syutsuba.html"
-    card_html = intro_html if parsed.path.endswith("/syutsuba.html") else fetch(session, card_url)
-    soup = BeautifulSoup(card_html, "html.parser")
-    # A pre-publication page can omit the venue/date/race heading entirely.
-    # Classify that state BEFORE checking identity, but never treat it as a card.
-    body = soup.get_text(" ", strip=True)
-    compact_body = re.sub(r"\s+", "", body)
-    if re.search(r"出馬表.{0,120}(?:公開予定|公開していません|公開前)", compact_body):
-        raise ValueError("Official syutsuba page not yet published")
-
-    # Only race-specific title/headings and descriptive metadata are identity
-    # evidence; site-wide navigation and unrelated race links are excluded.
-    sources = [t.get_text(" ", strip=True) for t in soup.find_all(["h1", "h2", "h3", "title"])]
-    for tag in soup.find_all("meta"):
-        if tag.get("property") in ("og:title", "twitter:title") or tag.get("name") == "description":
-            sources.append(tag.get("content", ""))
-    compact = re.sub(r"\s+", "", " ".join(sources))
-    if race_name not in compact or venue not in compact:
-        raise ValueError("Official syutsuba page race name or venue not verifiable")
-    if not any(d in compact for d in (f"{day.year}年{day.month}月{day.day}日", f"{day.month}月{day.day}日")):
-        raise ValueError("Official syutsuba page date not verifiable")
-    # Downstream validation still requires exactly one complete horse table,
-    # a verified race number, and fully parseable entries.
-    return card_url, card_html
-
-
-def card_race_number(card_html, venue, race_name):
-    """Read a race number from the official race card, never from a guess."""
-    soup = BeautifulSoup(card_html, "html.parser")
-    # The card must identify the expected race; do not accept a bare 11R
-    # from a navigation menu or another race on the same page.
-    norm = lambda s: re.sub(r"\s+", "", s).replace("（", "(").replace("）", ")")
-    expected = norm(race_name)
-    blocks = []
-    for tag in soup.find_all(["h1", "h2", "h3", "title"]):
-        blocks.append(tag.get_text(" ", strip=True))
-    for tag in soup.find_all("meta"):
-        if tag.get("property") in ("og:title", "twitter:title"):
-            blocks.append(tag.get("content", ""))
-    for tag in soup.select("main, article, [role='main']"):
-        blocks.append(tag.get_text(" ", strip=True)[:1200])
-    matches = set()
-    for block in blocks:
-        compact = norm(block)
-        if expected not in compact:
-            continue
-        # Keep the number local to the race name to avoid navigation links.
-        at = compact.find(expected)
-        nearby = compact[max(0, at-100):at+len(expected)+100]
-        for m in re.finditer(r"(?<!\d)(1[0-2]|[1-9])\s*(?:R|レース)(?!\d)", nearby, re.I):
-            matches.add(int(m.group(1)))
-    if len(matches) != 1:
-        raise ValueError(f"Cannot verify unique race number from official card (found={sorted(matches)})")
-    return matches.pop()
-
-
-def card_row_count(html):
+def featured_urls(html):
     soup = BeautifulSoup(html, "html.parser")
-    counts = []
+    urls = set()
+    for a in soup.find_all("a", href=True):
+        url = urljoin(HOME, a["href"])
+        p = urlparse(url)
+        if p.scheme == "https" and p.hostname in ("www.jra.go.jp", "jra.jp") and RACE_LINK.fullmatch(p.path):
+            urls.add("https://www.jra.go.jp" + p.path)
+    return sorted(urls)
+
+
+def featured_metadata(html, today):
+    soup = BeautifulSoup(html, "html.parser")
+    main = soup.select_one("main, article, [role='main']") or soup
+    text = main.get_text(" ", strip=True)
+    dates = {date(*map(int, m)) for m in DATE_RE.findall(text)}
+    dates = {d for d in dates if today <= d <= today + timedelta(days=9)}
+    if len(dates) != 1:
+        raise ValueError("Featured race date is not unique")
+    titles = [normalized(x.get_text(" ", strip=True)) for x in soup.find_all(["h1", "h2", "h3", "title"])]
+    pattern = re.compile(r"(?:第\d+回)?([一-龥々ァ-ヶー・A-Za-z0-9ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+?(?:ステークス|カップ|記念|大賞典|ダービー|優駿牝馬|天皇賞|菊花賞|皐月賞|有馬記念|ジャパンカップ))")
+    names = {m.group(1) for title in titles for m in pattern.finditer(title)}
+    if len(names) != 1:
+        raise ValueError("Featured race name is not unique")
+    name = names.pop()
+    venue_sources = [t for t in titles if name in t]
+    venues = {v for t in venue_sources for v in VENUES if v + "競馬場" in t}
+    if len(venues) != 1:
+        # The race-specific main text may include the venue even when headings do not.
+        near = normalized(text)
+        at = near.find(name)
+        if at >= 0:
+            venues = {v for v in VENUES if v + "競馬場" in near[max(0, at-150):at+len(name)+150]}
+    if len(venues) != 1:
+        raise ValueError("Featured race venue is not unique")
+    return dates.pop(), venues.pop(), name
+
+
+def card_links(html, source_url):
+    """Extract *actual* JRADB links and JRA doAction targets, never guess IDs."""
+    soup = BeautifulSoup(html, "html.parser")
+    found = set()
+    for a in soup.find_all("a"):
+        if a.get("href"):
+            url = urljoin(source_url, a["href"])
+            p = urlparse(url)
+            if p.scheme == "https" and p.hostname == "www.jra.go.jp" and p.path == "/JRADB/accessD.html":
+                if len(parse_qs(p.query).get("CNAME", [])) == 1:
+                    found.add(url.split("#", 1)[0])
+        for attr in ("onclick",):
+            action = a.get(attr, "")
+            for m in ACTION_RE.finditer(action):
+                # Index links are not cards; verification later rejects them.
+                found.add("https://www.jra.go.jp" + m.group(1) + "?CNAME=" + m.group(2))
+    return sorted(found)
+
+
+def card_details(html):
+    """Read identity from a single JRA race-card table, not site navigation."""
+    soup = BeautifulSoup(html, "html.parser")
+    cards = []
     for table in soup.find_all("table"):
-        rows = table.find_all("tr")
-        for i, row in enumerate(rows):
-            cells = row.find_all(["th", "td"], recursive=False)
-            heads = [re.sub(r"\s+", "", c.get_text(" ", strip=True)) for c in cells]
-            if heads.count("馬番") == 1 and heads.count("馬名") == 1:
-                ni, hi = heads.index("馬番"), heads.index("馬名")
-                nums = []
-                for r in rows[i+1:]:
-                    c = r.find_all(["th", "td"], recursive=False)
-                    if len(c) > max(ni, hi):
-                        raw = re.sub(r"\s+", "", c[ni].get_text(" ", strip=True))
-                        if re.fullmatch(r"\d{1,2}", raw):
-                            nums.append(int(raw))
-                if nums:
-                    counts.append(len(nums))
-    if len(counts) != 1 or not 2 <= counts[0] <= 18:
-        raise ValueError("Cannot identify exactly one complete horse table")
-    return counts[0]
+        if not table.select_one("thead th") or not table.select_one("tbody tr"):
+            continue
+        header = normalized(table.select_one("thead").get_text(" ", strip=True))
+        if "馬番" not in header or "馬名" not in header:
+            continue
+        caption = table.find("caption")
+        if caption is None:
+            continue
+        d = DATE_RE.search(caption.get_text(" ", strip=True))
+        race_name = caption.select_one(".race_name")
+        race_number = caption.select_one(".race_number img[alt]")
+        if not d or not race_name or not race_number:
+            continue
+        n = re.fullmatch(r"(1[0-2]|[1-9])レース", race_number.get("alt", ""))
+        if not n:
+            continue
+        day = date(*map(int, d.groups()))
+        race = normalized(race_name.get_text(" ", strip=True))
+        # "5回東京3日" in the card's date line uniquely establishes venue.
+        date_line = caption.select_one(".date_line")
+        venue_text = normalized(date_line.get_text(" ", strip=True)) if date_line else ""
+        venues = [v for v in VENUES if re.search(r"\d+回" + v + r"\d+日", venue_text)]
+        if len(venues) != 1:
+            continue
+        rows = table.select("tbody tr")
+        if not 2 <= len(rows) <= 18:
+            continue
+        cards.append((day, venues[0], int(n.group(1)), race, len(rows)))
+    if len(cards) != 1:
+        raise ValueError(f"Expected one complete JRA race card, found {len(cards)}")
+    return cards[0]
+
+
+def discover(session, today):
+    featured = []
+    home = fetch(session, HOME)
+    urls = featured_urls(home)
+    print(f"DISCOVERY: {len(urls)} featured race pages", flush=True)
+    source_pages = [(HOME, home)]
+    for url in urls:
+        try:
+            html = fetch(session, url)
+            source_pages.append((url, html))
+            try:
+                featured.append(featured_metadata(html, today))
+            except ValueError as exc:
+                print(f"SKIP FEATURED METADATA {url}: {exc}", flush=True)
+        except requests.RequestException as exc:
+            print(f"SKIP FEATURED FETCH {url}: {exc}", flush=True)
+    try:
+        source_pages.append((INDEX, fetch(session, INDEX)))
+    except requests.RequestException as exc:
+        print(f"SKIP OFFICIAL INDEX: {exc}", flush=True)
+    candidate_urls = set()
+    for source_url, html in source_pages:
+        candidate_urls.update(card_links(html, source_url))
+    print(f"CARD LINKS: {len(candidate_urls)} official JRA links found", flush=True)
+    matches = []
+    for url in sorted(candidate_urls):
+        try:
+            card = fetch(session, url)
+            day, venue, number, name, count = card_details(card)
+            if not today < day <= today + timedelta(days=9):
+                continue
+            if (day, venue, name) not in featured:
+                # Never publish a race discovered only from an unrelated link.
+                continue
+            matches.append((day, venue, number, name, count, url, card))
+        except (ValueError, requests.RequestException) as exc:
+            print(f"SKIP CARD {url}: {exc}", flush=True)
+    # One unique official card per race. Ambiguous URLs must not be guessed.
+    by_race = {}
+    for candidate in matches:
+        key = candidate[:4]
+        by_race.setdefault(key, []).append(candidate)
+    safe = []
+    for key, group in by_race.items():
+        if len(group) != 1:
+            print(f"SAFE SKIP ambiguous official cards {key}: {len(group)}", flush=True)
+            continue
+        safe.append(group[0])
+    return sorted(safe, key=lambda c: c[:4])
 
 
 def main():
     today = datetime.now(JST).date()
     session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; read-only race data check)"})
-    urls = featured_urls(fetch(session, HOME))
-    print(f"DISCOVERY: {len(urls)} featured race-card pages", flush=True)
-    candidates = []
-    for url, labels in urls:
-        try:
-            page = fetch(session, url)
-            day, venue, name = metadata(page, today, labels)
-            candidates.append((day, venue, name, url, page))
-        except (ValueError, requests.RequestException) as e:
-            print(f"SKIP {url}: {e}", flush=True)
-    # Intro and syutsuba links for the same race must be processed only once.
-    unique = {}
-    for candidate in candidates:
-        day, venue, name, url, page = candidate
-        key = (day, venue, name)
-        if key not in unique or (url.endswith("/syutsuba.html") and not unique[key][3].endswith("/syutsuba.html")):
-            unique[key] = candidate
-    candidates = sorted(unique.values(), key=lambda c: (c[0], c[1], c[2]))
-    if not candidates:
-        print("WAIT: no future featured races verified from JRA homepage")
+    session.headers.update({"User-Agent": "Mozilla/5.0"})
+    try:
+        candidates = discover(session, today)
+    except requests.RequestException as exc:
+        print(f"WAIT: JRA discovery unavailable: {exc}", flush=True)
         return 0
-
-    for day, venue, name, url, page in candidates:
-        key = f"{day.isoformat()}_{venue}_{name}"
-        print(f"CHECK {key}", flush=True)
+    if not candidates:
+        print("WAIT: no verified future featured race card; no prediction fabricated", flush=True)
+        return 0
+    for day, venue, number, name, count, card_url, card in candidates:
+        key = f"{day.isoformat()}_{venue}_{number:02d}R"
+        print(f"CHECK {key} {name}", flush=True)
         try:
-            # Never manufacture a race-card URL from a race-introduction URL.
-            # The official page must link directly to a unique JRADB card.
-            card_url, card = discover_official_card(session, page, url, day, venue, name)
-            count = card_row_count(card)
-            number = card_race_number(card, venue, name)
             entries = parse_entries(card, card_url, day.isoformat(), venue, number, name, count)
-            # Save per-race outputs; prevent one race overwriting another.
-            folder = Path("keiba_rolling_results") / f"{day.isoformat()}_{venue}_{number:02d}R"
-            folder.mkdir(parents=True, exist_ok=True)
-            (folder/"entries.json").write_text(json.dumps(entries, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
+            # Generate outputs only after the entire pipeline succeeds.
             history = collect(entries, session=session)
-            (folder/"history.json").write_text(json.dumps(history, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
             ranking = rank(entries, history)
             ranking["provisional"] = True
-            ranking["warning"] = "Automated historical form ranking, NOT a verified win prediction; confirm horse identity and race details."
-            (folder/"ranking.json").write_text(json.dumps(ranking, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
-            print(f"SUCCESS PRELIMINARY {key} {count} horses; NO POSTING", flush=True)
+            ranking["warning"] = "Historical form only; horse identities not independently verified."
+            folder = Path("keiba_rolling_results") / key
+            folder.mkdir(parents=True, exist_ok=True)
+            for filename, payload in (("entries.json", entries), ("history.json", history), ("ranking.json", ranking)):
+                (folder / filename).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            print(f"SUCCESS PRELIMINARY {key}: {count} horses; NO POSTING", flush=True)
             return 0
-        except (ValueError, KeyError, IndexError, requests.RequestException) as e:
-            print(f"SAFE SKIP {key}: {type(e).__name__}: {e}", flush=True)
-    print("WAIT: no safely processable race card; no prediction fabricated")
+        except (ValueError, KeyError, IndexError, TypeError, requests.RequestException) as exc:
+            print(f"SAFE SKIP {key}: {type(exc).__name__}: {exc}", flush=True)
+    print("WAIT: no safely processable race card; no prediction fabricated", flush=True)
     return 0
 
 
