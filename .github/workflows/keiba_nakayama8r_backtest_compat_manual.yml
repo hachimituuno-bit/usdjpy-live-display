@@ -1,0 +1,32 @@
+name: Keiba Nakayama 8R Backtest Compatibility Check (Manual Only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install requests beautifulsoup4
+      - name: Check diagnostic file
+        run: test -f keiba_nakayama8r_backtest_compat_check.py
+      - name: Inspect race entrants (read only)
+        run: python -u keiba_nakayama8r_backtest_compat_check.py
+      - name: Upload diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-nakayama8r-backtest-compatibility
+          path: keiba_nakayama8r_backtest_compat_check.json
+          if-no-files-found: warn
