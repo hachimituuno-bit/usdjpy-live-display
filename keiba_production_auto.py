@@ -29,7 +29,7 @@ def discover(day, limit=350):
         f'https://www.jra.go.jp/keiba/calendar{day.year}/{day.year}/{day.month:02d}/{day:%m%d}.html',
     ]
     queue=deque((url,0) for url in seeds)
-    seen=set(); found={}; errors=[]
+    seen=set(); found={}; errors=[]; diagnostics=[]; link_samples=[]
     target=day.strftime('%Y%m%d')
     while queue and len(seen)<limit:
         url,depth=queue.popleft()
@@ -40,6 +40,14 @@ def discover(day, limit=350):
             errors.append(f'{url}: {e}')
             continue
         parsed=urlparse(url)
+        if len(diagnostics)<45:
+            diagnostics.append({'url':url,'title':(soup.title.get_text(' ',strip=True) if soup.title else '')[:130], 'table_count':len(soup.find_all('table')), 'horse_links':len(soup.select('a[href*="accessU.html"]')), 'race_links':len(soup.select('a[href*="accessD.html"]'))})
+        if len(link_samples)<40:
+            for a in soup.find_all('a',href=True):
+                href=urljoin(url,a['href'])
+                if 'accessD.html' in href or 'shutuba' in href.lower() or 'syutuba' in href.lower():
+                    if href not in link_samples: link_samples.append(href)
+                    if len(link_samples)>=40: break
         cname=parse_qs(parsed.query).get('CNAME',[''])[0]
         page_text=soup.get_text(' ',strip=True)
         if parsed.path.endswith('/accessD.html') and target in cname:
@@ -59,6 +67,8 @@ def discover(day, limit=350):
                 if link not in seen: queue.append((link,depth+1))
     if not found:
         errors.append(f'No verified official entries for {target}; visited {len(seen)} pages. JRA site layout or access restrictions may require a supported data source.')
+    OUT.mkdir(exist_ok=True)
+    (OUT/'discovery_diagnostics.json').write_text(json.dumps({'date':day.isoformat(),'visited_count':len(seen),'sample_pages':diagnostics,'sample_entry_links':link_samples,'errors':errors[:30]},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     return found,errors
 
 def extract_entries(day,venue,num,url,soup):
