@@ -8,9 +8,9 @@ import sys
 from pathlib import Path
 
 
-def execute(script):
+def execute(script, *arguments):
     result = subprocess.run(
-        [sys.executable, script],
+        [sys.executable, script, *arguments],
         capture_output=True,
         text=True,
         check=False,
@@ -48,7 +48,11 @@ def main():
     if not Path('keiba_historical_backtest.py').is_file():
         raise SystemExit('ERROR: keiba_historical_backtest.py missing')
 
-    backtest = execute('keiba_historical_backtest.py')
+    races_file = Path('keiba_races.json')
+    if not races_file.is_file():
+        raise SystemExit('ERROR: keiba_races.json missing; 7-race test not started')
+    print('BACKTEST_RACES_FILE: keiba_races.json', flush=True)
+    backtest = execute('keiba_historical_backtest.py', '--races-file', str(races_file))
     backtest_success = (
         backtest.returncode == 0
         and 'BACKTEST SUCCESS' in backtest.stdout
