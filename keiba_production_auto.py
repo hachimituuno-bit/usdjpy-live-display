@@ -21,35 +21,44 @@ def fetch(url):
     r=SESSION.get(url,timeout=22); r.raise_for_status(); r.encoding=r.apparent_encoding
     return BeautifulSoup(r.text,'html.parser')
 
-def discover(day, limit=130):
-    """Follow official race-selection links, never use result pages for pre-race entries."""
-    seeds=list(BASES)
-    seeds += [f'https://www.jra.go.jp/keiba/calendar{day.year}/{day.year}/{day.month:02d}/{day:%m%d}.html']
-    queue=deque((s,0) for s in seeds); seen=set(); found={}; errors=[]
+def discover(day, limit=350):
+    """Find pre-race entry pages using official JRA links; record diagnostics."""
+    seeds = list(BASES) + [
+        'https://www.jra.go.jp/keiba/',
+        'https://www.jra.go.jp/keiba/thisweek/',
+        f'https://www.jra.go.jp/keiba/calendar{day.year}/{day.year}/{day.month:02d}/{day:%m%d}.html',
+    ]
+    queue=deque((url,0) for url in seeds)
+    seen=set(); found={}; errors=[]
+    target=day.strftime('%Y%m%d')
     while queue and len(seen)<limit:
         url,depth=queue.popleft()
         if url in seen: continue
         seen.add(url)
         try: soup=fetch(url)
-        except Exception as e: errors.append(f'{url}: {e}'); continue
-        text=soup.get_text(' ',strip=True)
-        parsed=urlparse(url); cname=parse_qs(parsed.query).get('CNAME',[''])[0]
-        if parsed.path.endswith('/accessD.html') and day.strftime('%Y%m%d') in cname:
-            header=text[:600]
-            venue=next((v for v in VENUES if re.search(r'(?:回|\s)'+v+r'\d+日',header)),None)
-            number_match=re.search(r'(?:^|\s)(\d{1,2})\s*レース',header) or re.search(r'(?:^|\s)(\d{1,2})R\b',header)
-            if venue and number_match:
-                num=int(number_match.group(1))
-                if 1<=num<=12:
-                    found[(venue,num)]=(url,soup)
-        if depth>=3: continue
+        except Exception as e:
+            errors.append(f'{url}: {e}')
+            continue
+        parsed=urlparse(url)
+        cname=parse_qs(parsed.query).get('CNAME',[''])[0]
+        page_text=soup.get_text(' ',strip=True)
+        if parsed.path.endswith('/accessD.html') and target in cname:
+            venue=next((v for v in VENUES if re.search(r'(?:\d+回)?'+v+r'\d+日',page_text[:1200])),None)
+            matches=re.findall(r'(?<!\d)(1[0-2]|[1-9])\s*(?:R|レース)',page_text[:1200])
+            if venue and matches:
+                num=int(matches[0]); found[(venue,num)]=(url,soup)
+        if depth>=5: continue
         for a in soup.find_all('a',href=True):
             link=urljoin(url,a['href']); p=urlparse(link)
-            if p.hostname not in ('www.jra.go.jp','sp.jra.jp','jra.jp'): continue
-            if not (p.path.endswith('/accessD.html') or '/keiba/calendar' in p.path): continue
-            query=parse_qs(p.query).get('CNAME',[''])[0]
-            if query and day.strftime('%Y%m%d') not in query and depth>=1: continue
-            if link not in seen: queue.append((link,depth+1))
+            if p.scheme!='https' or p.hostname not in ('www.jra.go.jp','sp.jra.jp','jra.jp'): continue
+            path=p.path
+            if path.endswith('/accessD.html'):
+                # JRA CNAME formats vary. Check the target date on the destination page.
+                if link not in seen: queue.append((link,depth+1))
+            elif depth<3 and (path.endswith('/accessI.html') or '/keiba/thisweek/' in path or '/keiba/calendar' in path):
+                if link not in seen: queue.append((link,depth+1))
+    if not found:
+        errors.append(f'No verified official entries for {target}; visited {len(seen)} pages. JRA site layout or access restrictions may require a supported data source.')
     return found,errors
 
 def extract_entries(day,venue,num,url,soup):
