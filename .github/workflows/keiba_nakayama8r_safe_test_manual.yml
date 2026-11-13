@@ -1,0 +1,25 @@
+name: Keiba Nakayama 8R Safe Parser Test (Manual Only)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  safe-parser-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install requests beautifulsoup4
+      - name: Run isolated parser test
+        run: python keiba_nakayama8r_safe_test.py
+      - name: Upload diagnostic output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nakayama8r-safe-parser-diagnostic
+          path: keiba_nakayama8r_safe_test.json
+          if-no-files-found: warn
