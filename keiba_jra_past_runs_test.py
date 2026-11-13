@@ -8,6 +8,7 @@ No predictions, email, or Blogger posting.
 import argparse
 import json
 import re
+import unicodedata
 from datetime import date
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -70,7 +71,7 @@ FINISH_STATUS_MAP = {
 
 def clean(value):
     return re.sub(
-        r"\s+", " ", value
+        r"\s+", " ", unicodedata.normalize("NFKC", value)
     ).strip()
 
 
@@ -272,6 +273,7 @@ def extract_runs(
 
     extracted = []
     data_rows = 0
+    skipped_blank_distance = []
 
     for tr in table.find_all("tr"):
         cells = tr.find_all(
@@ -305,6 +307,24 @@ def extract_runs(
 
         venue = values[1]
         race_name = values[2]
+
+        # Some JRA profile rows have no distance (non-standard records).
+        # Do not invent a distance or a surface. Exclude only these rows,
+        # and make the exclusion visible for auditing.
+        if not values[3]:
+            skipped_blank_distance.append({
+                "date": race_date.isoformat(),
+                "venue": venue,
+                "race_name": race_name,
+                "finish": values[7],
+            })
+            print(
+                f"SKIP BLANK DISTANCE horse={horse_name!r} "
+                f"date={race_date} venue={venue!r} race={race_name!r} "
+                f"finish={values[7]!r}",
+                flush=True,
+            )
+            continue
 
         distance_m, distance_surface = (
             parse_distance(values[3])
@@ -367,7 +387,8 @@ def extract_runs(
 
     if not extracted:
         raise ValueError(
-            "No historical runs before target date"
+            "No usable historical runs before target date "
+            f"(blank-distance rows skipped: {len(skipped_blank_distance)})"
         )
 
     extracted.sort(
@@ -383,6 +404,14 @@ def extract_runs(
         raise ValueError(
             "Duplicate race dates found; "
             "manual verification required"
+        )
+
+    if skipped_blank_distance:
+        print(
+            f"HISTORY DATA WARNING horse={horse_name!r}: "
+            f"excluded {len(skipped_blank_distance)} blank-distance rows; "
+            "ranking may be affected by incomplete history",
+            flush=True,
         )
 
     return (
