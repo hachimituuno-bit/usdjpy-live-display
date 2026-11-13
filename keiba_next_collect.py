@@ -42,19 +42,44 @@ def validate_entries(data):
     return day
 
 
+
+def official_profile_name(soup):
+    """Read the Japanese horse name from the JRA profile's main heading."""
+    candidates = []
+    for heading in soup.select("h1 .txt"):
+        labels = heading.select(".opt")
+        if len(labels) != 1 or labels[0].get_text(" ", strip=True) != "競走馬情報":
+            continue
+        # The name is a direct text node, not the English name or section label.
+        direct_text = [str(node).strip() for node in heading.contents
+                       if isinstance(node, str) and str(node).strip()]
+        if len(direct_text) != 1:
+            raise ValueError("Ambiguous JRA profile heading horse name")
+        candidates.append(direct_text[0])
+    if len(candidates) != 1:
+        raise ValueError(f"Expected one official JRA horse-name heading; found {len(candidates)}")
+    return candidates[0]
+
+
 def collect(entries, max_runs=5, session=None, delay=0.5):
     day = validate_entries(entries)
     if not 1 <= max_runs <= 5:
         raise ValueError('max_runs must be 1..5')
     session = session or requests.Session()
     result = {'target_date': day.isoformat(), 'posting': False, 'horses': [],
-              'identity_note': 'Horse name on JRA profile is checked; independent identity verification is not performed.'}
+              'identity_note': 'JRA profile heading must exactly match entry name; independent identity verification is not performed.'}
     for index, horse in enumerate(entries['horses']):
         url = horse['horse_url']
         response = session.get(url, timeout=20, headers={'User-Agent': 'Mozilla/5.0 (compatible; read-only-research/1.0)'})
         response.raise_for_status()
         response.encoding = response.apparent_encoding
         soup = BeautifulSoup(response.text, 'html.parser')
+        profile_name = official_profile_name(soup)
+        if profile_name != horse['name']:
+            raise ValueError(
+                f"JRA horse identity mismatch: entry={horse['name']!r}, "
+                f"profile={profile_name!r}, URL={url}"
+            )
         runs, available = extract_runs(soup, day, max_runs, horse_name=horse['name'])
         cid = parse_qs(urlparse(url).query)['CNAME'][0]
         result['horses'].append({'name': horse['name'], 'identity_candidate': cid,
