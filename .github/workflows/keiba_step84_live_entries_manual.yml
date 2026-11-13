@@ -1,0 +1,24 @@
+name: Keiba Step84 Live Entries Contract (Manual Only)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install requests beautifulsoup4
+      - name: Live JRA entrant inspection only
+        run: python keiba_step84_live_entries_test.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: keiba-step84-live-entries-result
+          path: keiba_step84_live_entries_result.json
+          if-no-files-found: warn
