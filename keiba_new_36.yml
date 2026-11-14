@@ -1,0 +1,55 @@
+name: Keiba NEW 36 races (independent)
+on:
+  # Saturday and Sunday 08:30 JST (Friday/Saturday 23:30 UTC)
+  schedule:
+    - cron: '30 23 * * 5,6'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'YYYY-MM-DD (blank = today JST)'
+        required: false
+        type: string
+      publish:
+        description: 'true = SMTP send; false = preview only'
+        required: true
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+permissions:
+  contents: read
+concurrency:
+  group: keiba-new-all-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Dependencies
+        run: python -m pip install 'requests>=2.31,<3' 'beautifulsoup4>=4.12,<5'
+      - name: Fetch and score all 36 races (new method 0.5)
+        env:
+          RACE_DATE: ${{ inputs.date }}
+        run: python keiba_new/keiba_new_all_races.py --date "$RACE_DATE"
+      - name: Render complete 36-race Blogger article
+        run: python keiba_new/keiba_new_blog_post.py
+      - name: Send complete new-method article (scheduled or explicit manual true)
+        if: ${{ github.event_name == 'schedule' || inputs.publish == 'true' }}
+        env:
+          BLOGGER_POST_EMAIL: ${{ secrets.BLOGGER_POST_EMAIL }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+        run: python keiba_new/keiba_new_blog_post.py --send
+      - name: Upload preview and diagnostic results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-new-36-${{ github.run_id }}
+          path: keiba_new_results/
+          if-no-files-found: warn
