@@ -17,18 +17,44 @@ def get(url):
     r=S.get(url,timeout=25);r.raise_for_status();r.encoding=r.apparent_encoding
     return BeautifulSoup(r.text,'html.parser')
 def race_links(day):
-    # Yahoo race IDs: YY + 2-digit venue code + 2-digit meeting + 2-digit day + 2-digit race
-    # Discover links rather than inventing meeting/day codes.
-    seeds=[f'https://sports.yahoo.co.jp/keiba/race/list/{day:%Y%m%d}']
-    found={};errors=[]
+    """Find actual Yahoo race IDs via date-verified venue lists, not YYYYMMDD URL guesses."""
+    target=f'{day.year}年{day.month}月{day.day}日'
+    found={}; errors=[]; candidates=set(); seen=set()
+    # The homepage and calendar expose real YY+venue+meeting+day IDs.
+    seeds=['https://sports.yahoo.co.jp/keiba/',
+           f'https://sports.yahoo.co.jp/keiba/schedule/list/{day.year}{day.month:02d}']
+    pattern=re.compile(r'/keiba/race/(?:list|denma|index|result)/([0-9]{8,10})(?:[/?#]|$)')
     for url in seeds:
         try:
             soup=get(url)
             for a in soup.select('a[href]'):
-                href=urljoin(url,a['href']);m=re.search(r'/keiba/race/(?:denma|result|index)/([0-9]{10})(?:[/?#]|$)',href)
+                href=urljoin(url,a['href']); m=pattern.search(href)
                 if m and m.group(1).startswith(day.strftime('%y')):
-                    rid=m.group(1);found[rid]='https://sports.yahoo.co.jp/keiba/race/denma/'+rid+'?detail=1'
-        except Exception as e:errors.append(str(e))
+                    candidates.add(m.group(1)[:8])
+        except Exception as e: errors.append(f'{url}: {e}')
+    # Each candidate MUST be checked against the actual date printed on the list page.
+    for prefix in sorted(candidates):
+        url='https://sports.yahoo.co.jp/keiba/race/list/'+prefix
+        try:
+            soup=get(url)
+            text=soup.get_text(' ',strip=True)
+            if not re.search(rf'{day.year}年\s*{day.month}月\s*{day.day}日',text[:1200]):
+                continue
+            seen.add(prefix)
+            for a in soup.select('a[href]'):
+                href=urljoin(url,a['href'])
+                m=re.search(r'/keiba/race/(?:denma|index|result)/([0-9]{10})(?:[/?#]|$)',href)
+                if m and m.group(1).startswith(prefix) and 1<=int(m.group(1)[-2:])<=12:
+                    rid=m.group(1)
+                    found[rid]='https://sports.yahoo.co.jp/keiba/race/denma/'+rid+'?detail=1'
+            # List pages sometimes link to race pages only through script-rendered UI.
+            # Validate each race individually before accepting it downstream.
+            if not any(r.startswith(prefix) for r in found):
+                for n in range(1,13):
+                    rid=f'{prefix}{n:02d}'
+                    found[rid]='https://sports.yahoo.co.jp/keiba/race/denma/'+rid+'?detail=1'
+        except Exception as e: errors.append(f'{url}: {e}')
+    errors.append(f'Diagnostics: candidate_list_ids={sorted(candidates)}, verified_list_ids={sorted(seen)}')
     return found,errors
 
 def race_metadata(soup, day, rid, expected_venue=''):
@@ -41,6 +67,9 @@ def race_metadata(soup, day, rid, expected_venue=''):
     if not venue or not 1<=number<=12: raise ValueError('Invalid race ID '+rid)
     if expected_venue and venue!=expected_venue: raise ValueError('Venue mismatch '+rid)
     title=soup.title.get_text(' ',strip=True) if soup.title else ''
+    page_text=soup.get_text(' ',strip=True)
+    if not re.search(rf'{day.year}年\s*{day.month}月\s*{day.day}日',page_text[:1500]):
+        raise ValueError('Race date not confirmed on entry page '+rid)
     if '出馬表' not in title and '出走表' not in title and '出馬表' not in soup.get_text(' ',strip=True)[:2000]:
         raise ValueError('Not verified as an entry page '+rid)
     return venue,number
@@ -116,6 +145,8 @@ def history_from_yahoo(entry,day):
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--mode',choices=['auto','manual'],default='auto');ap.add_argument('--date',default='');ap.add_argument('--venue',default='');ap.add_argument('--race',type=int,default=0)
     a=ap.parse_args();day=date.fromisoformat(a.date) if a.date else datetime.now(ZoneInfo('Asia/Tokyo')).date();OUT.mkdir(exist_ok=True)
+    if a.mode=='manual' and (a.venue not in VENUES or not 1<=a.race<=12):
+        ap.error('manual requires --venue and --race 1..12')
     summary={'date':day.isoformat(),'mode':a.mode,'source':'Yahoo!競馬','status':'FAILED','predicted':[],'failed':[],'notes':[]}
     try:
         ids,errors=race_links(day);summary['discovery_errors']=errors;summary['discovered_race_ids']=sorted(ids)
