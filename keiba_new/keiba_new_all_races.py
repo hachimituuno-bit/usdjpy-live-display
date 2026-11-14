@@ -14,16 +14,58 @@ BASE=Path('keiba_new_results')
 VENUES=('福島','東京','京都','札幌','函館','新潟','中山','中京','阪神','小倉')
 
 def condition(soup, rid):
-    # コースは出馬表の表示から確認。推測して採点しない。
-    text=soup.get_text(' ',strip=True)
-    matches=re.findall(r'(?<![\w])(?:芝|ダート|ダ)\s*[：:]?\s*(\d{3,4})\s*[mｍメートル]?',text[:5000])
-    # コース種別と距離を同じ文字列から抽出
-    pairs=re.findall(r'(芝|ダート|ダ)\s*[：:]?\s*(\d{3,4})\s*(?:m|ｍ|メートル)?',text[:5000])
-    pairs=[('ダート' if x in ('ダ','ダート') else '芝',int(y)) for x,y in pairs if 800<=int(y)<=4000]
-    unique=set(pairs)
-    if len(unique)!=1:
-        raise ValueError(f'{rid}: 芝ダート・距離を一意に確認できません {sorted(unique)}')
-    return next(iter(unique))
+    """出馬表のレース見出しだけからコース条件を確定する。
+
+    過去走・他レースへのリンク・ページ下部の条件は混ぜない。
+    判断できない場合は安全のため予想を中止する。
+    """
+    # Yahooのレース条件はレース見出し周辺に表示される。
+    # ページ全体を走査すると過去走のコースが混ざるため禁止。
+    candidates = []
+    selectors = (
+        '.hr-raceData', '.hr-raceData__data', '.hr-raceData__course',
+        '.hr-raceInfo', '.hr-raceInfo__data',
+        '.raceData', '.raceData__data', '.raceInfo',
+        'main h1', 'main h2', 'h1', 'h2',
+    )
+    for selector in selectors:
+        for node in soup.select(selector):
+            value = node.get_text(' ', strip=True)
+            if value and len(value) <= 500:
+                candidates.append((selector, value))
+    # レースページの先頭部分だけを最終フォールバックにする。
+    # 全文の過去走欄から芝・距離を拾うのは厳禁。
+    main = soup.select_one('main')
+    if main:
+        candidates.append(('main冒頭', main.get_text(' ', strip=True)[:350]))
+    candidates.append(('ページ冒頭', soup.get_text(' ', strip=True)[:350]))
+
+    def parse(text):
+        text = text.replace('\u3000', ' ').replace('ｍ', 'm')
+        # 例: 芝1400m、芝・左 1400m、ダート右 1800m
+        pattern = (r'(芝|ダート|ダ)(?!障害)\s*'
+                   r'(?:[・･/／]\s*)?'
+                   r'(?:(?:右|左|直線|外|内|外回り|内回り|右回り|左回り|外・内)'
+                   r'\s*[・･/／]?\s*){0,3}'
+                   r'(\d{3,4})\s*m?')
+        result = set()
+        for surface, distance in re.findall(pattern, text):
+            distance = int(distance)
+            if 800 <= distance <= 4000:
+                result.add(('ダート' if surface in ('ダ', 'ダート') else '芝', distance))
+        return result
+
+    # レースのコース情報を最も限定的に表示している要素を優先。
+    for label, value in candidates:
+        if '障害' in value and ('障害' in value[:60]):
+            raise ValueError(f'{rid}: 障害レースは平地用適性モデルの対象外')
+        found = parse(value)
+        if len(found) == 1:
+            return next(iter(found))
+        if len(found) > 1:
+            # 先頭のページ概要に複数条件が混じる場合は次の候補へ進む。
+            continue
+    raise ValueError(f'{rid}: レース見出しから芝ダート・距離を確定できません（推測禁止）')
 
 def rank_new(horses, venue, surface, distance, day):
     if not 2<=len(horses)<=18 or len({h['horse_number'] for h in horses})!=len(horses):
