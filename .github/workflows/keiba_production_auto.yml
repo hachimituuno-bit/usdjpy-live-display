@@ -62,6 +62,24 @@ jobs:
               if os.getenv(key):cmd.extend([flag,os.environ[key]])
           raise SystemExit(subprocess.call(cmd))
           PY
+
+      - name: Build one readable 36-race Blogger article
+        if: success()
+        run: python keiba_blog_post.py
+      - name: Send article to Blogger by email
+        if: success()
+        env:
+          BLOGGER_MAIL_TO: ${{ secrets.BLOGGER_MAIL_TO }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+        run: |
+          if [ -z "$BLOGGER_MAIL_TO" ] || [ -z "$SMTP_USER" ] || [ -z "$SMTP_PASSWORD" ] || [ -z "$SMTP_HOST" ]; then
+            echo 'Blogger SMTP secrets not configured; preview artifact only.'
+          else
+            python keiba_blog_post.py --send
+          fi
       - name: Upload predictions and errors
         if: always()
         uses: actions/upload-artifact@v4
