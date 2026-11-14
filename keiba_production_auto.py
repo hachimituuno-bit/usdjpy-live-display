@@ -8,6 +8,8 @@ import requests
 from bs4 import BeautifulSoup
 from keiba_next_race import rank
 OUT=Path('keiba_production_results')
+DIAG=OUT/'diagnostics'
+_saved_diagnostics=set()
 VENUES=('札幌','函館','福島','新潟','東京','中山','中京','京都','阪神','小倉')
 S=requests.Session();S.headers.update({'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36','Accept-Language':'ja-JP,ja;q=0.9'})
 def get(url):
@@ -99,7 +101,15 @@ def entries_from_table(soup,rid):
             horses.append({'number':num,'name':name,'identity_candidate':'yahoo:'+match[1],
                            'horse_url':'https://sports.yahoo.co.jp/keiba/horse/'+match[1]})
         if len(horses)>len(candidates):candidates=horses
-    if len(candidates)<2:raise ValueError(f'Cannot verify entrant rows for {rid} (found {len(candidates)})')
+    if len(candidates)<2:
+        DIAG.mkdir(parents=True,exist_ok=True)
+        if len(_saved_diagnostics)<2 and rid not in _saved_diagnostics:
+            _saved_diagnostics.add(rid)
+            (DIAG/f'{rid}_entry_page.html').write_text(str(soup),encoding='utf-8')
+            horse_links=[{'text':a.get_text(' ',strip=True)[:100], 'href':a.get('href','')[:250]} for a in soup.select('a[href]') if '/keiba/horse/' in a.get('href','')]
+            tables=[{'rows':len(t.select('tr')),'first_rows':[r.get_text(' ',strip=True)[:350] for r in t.select('tr')[:3]]} for t in soup.select('table')[:8]]
+            (DIAG/f'{rid}_structure.json').write_text(json.dumps({'race_id':rid,'title':soup.title.get_text(' ',strip=True) if soup.title else '', 'table_count':len(soup.select('table')),'horse_link_count':len(horse_links),'horse_links':horse_links[:15],'tables':tables,'html_size':len(str(soup))},ensure_ascii=False,indent=2),encoding='utf-8')
+        raise ValueError(f'Cannot verify entrant rows for {rid} (found {len(candidates)}); diagnostic saved')
     return sorted(candidates,key=lambda h:h['number'])
 
 def history_from_yahoo(entry,day):
@@ -164,7 +174,12 @@ def main():
                 lines=[f'{day} {venue}{num}R (Yahoo!競馬; odds unused)']+[f"{h['rank']}. {h['horse_number']} {h['horse_name']} score={h['form_score']}" for h in prediction['horses']]
                 (directory/'prediction.txt').write_text('\n'.join(lines)+'\n',encoding='utf-8')
                 summary['predicted'].append(f'{venue}{num}R');print('\n'.join(lines),flush=True)
-            except Exception as e:summary['failed'].append({'race_id':rid,'error':str(e)});print('FAILED',rid,str(e),flush=True)
+            except Exception as e:
+                summary['failed'].append({'race_id':rid,'error':str(e)})
+                print('FAILED',rid,str(e),flush=True)
+                if len(_saved_diagnostics)>=2:
+                    summary['notes'].append('Stopped after two HTML snapshots; inspect diagnostics artifact before further changes')
+                    break
         summary['status']='SUCCESS' if summary['predicted'] and not summary['failed'] else ('PARTIAL' if summary['predicted'] else 'FAILED')
         if a.mode=='manual' and not summary['predicted']:summary['notes'].append('Requested venue/race not successfully predicted')
     except Exception as e:summary['notes'].append(str(e));print('ERROR',str(e),flush=True)
