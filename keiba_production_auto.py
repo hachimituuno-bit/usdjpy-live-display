@@ -151,9 +151,13 @@ def main():
                 directory=OUT/f'{venue}_{num:02d}R';directory.mkdir(exist_ok=True)
                 for filename,obj in [('entries.json',entries),('history.json',history),('prediction.json',prediction)]:
                     (directory/filename).write_text(json.dumps(obj,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-                lines=[f'{day} {venue}{num}R (Yahoo!競馬; odds unused)']+[f"{h['rank']}. {h['horse_number']} {h['horse_name']} score={h['form_score']}" for h in prediction['horses']]
+                lines=[f'{day} {venue}{num}R (Yahoo!競馬; odds unused)']
+                lines.append(f"Scored {prediction['scored_horses']}/{len(prediction['horses'])}; unscored {prediction['unscored_horses']} (no verified history)")
+                lines += [f"{h['rank'] if h['rank'] is not None else '-'} . {h['horse_number']} {h['horse_name']} score={h['form_score'] if h['form_score'] is not None else 'N/A (no history)'}" for h in prediction['horses']]
                 (directory/'prediction.txt').write_text('\n'.join(lines)+'\n',encoding='utf-8')
-                summary['predicted'].append(f'{venue}{num}R');print('\n'.join(lines),flush=True)
+                summary['predicted'].append(f'{venue}{num}R')
+                summary.setdefault('unscored_races',[]).extend([f'{venue}{num}R'] if prediction['unscored_horses'] else [])
+                print('\n'.join(lines),flush=True)
             except Exception as e:
                 summary['failed'].append({'race_id':rid,'error':str(e)})
                 print('FAILED',rid,str(e),flush=True)

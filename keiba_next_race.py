@@ -51,8 +51,6 @@ def rank(entries, history):
             (r for r in runs if date.fromisoformat(r['date']) < race_date),
             key=lambda r: r['date'], reverse=True
         )[:5]
-        if not eligible:
-            raise ValueError(f'{name}: no verified pre-race historical runs')
 
         weighted_top3 = weighted_finish = weight_sum = 0.0
         valid_count = top3_count = 0
@@ -90,20 +88,28 @@ def rank(entries, history):
             'top3_finishes': top3_count,
             'recent_top3_rate': round(top3_form, 4) if top3_form is not None else None,
             'identity_verified': bool(horse.get('identity_verified', False)),
+            'evaluation_status': 'scored' if score is not None else 'no_verified_history',
         })
 
     ranked.sort(key=lambda h: (
         h['form_score'] is None, -(h['form_score'] or 0),
         -(h['completed_runs']), h['horse_number']
     ))
-    for i, h in enumerate(ranked, 1):
-        h['rank'] = i
+    position = 0
+    for h in ranked:
+        if h['form_score'] is None:
+            h['rank'] = None
+        else:
+            position += 1
+            h['rank'] = position
     return {
         'race_date': race_date.isoformat(), 'venue': entries['venue'],
         'race_number': entries['race_number'], 'race_name': entries['race_name'],
         'generated_at': datetime.now().astimezone().isoformat(), 'posting': False,
         'method': 'Top-three form priority: 85% recency-weighted top-3 finishes + 15% relative finish; weights 0.8^index; no odds',
-        'warning': 'Heuristic form score, NOT calibrated top-3 probability; race-specific conditions not adjusted; verify entrants and identities',
+        'warning': 'Heuristic form score, NOT calibrated top-3 probability; race-specific conditions not adjusted; horses without verified runs are unranked (null score/rank); verify entrants and identities',
+        'scored_horses': sum(h['form_score'] is not None for h in ranked),
+        'unscored_horses': sum(h['form_score'] is None for h in ranked),
         'horses': ranked,
     }
 
