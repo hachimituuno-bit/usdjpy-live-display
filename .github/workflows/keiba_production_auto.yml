@@ -69,17 +69,18 @@ jobs:
       - name: Send article to Blogger by email
         if: success()
         env:
-          BLOGGER_MAIL_TO: ${{ secrets.BLOGGER_MAIL_TO }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
+          BLOGGER_POST_EMAIL: ${{ secrets.BLOGGER_POST_EMAIL }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
         run: |
-          if [ -z "$BLOGGER_MAIL_TO" ] || [ -z "$SMTP_USER" ] || [ -z "$SMTP_PASSWORD" ] || [ -z "$SMTP_HOST" ]; then
-            echo 'Blogger SMTP secrets not configured; preview artifact only.'
-          else
-            python keiba_blog_post.py --send
+          set -eu
+          if [ -z "$BLOGGER_POST_EMAIL" ] || [ -z "$SMTP_USERNAME" ] || [ -z "$SMTP_PASSWORD" ]; then
+            echo 'ERROR: Blogger SMTP secrets not configured; refusing to report successful send.' >&2
+            exit 1
           fi
+          python keiba_blog_post.py --send
       - name: Upload predictions and errors
         if: always()
         uses: actions/upload-artifact@v4
