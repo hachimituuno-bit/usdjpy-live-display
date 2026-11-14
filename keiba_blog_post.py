@@ -7,6 +7,7 @@ import smtplib
 import ssl
 from datetime import date
 from email.message import EmailMessage
+from email.utils import parseaddr
 from pathlib import Path
 
 BASE = Path('keiba_production_results')
@@ -67,23 +68,39 @@ def main():
     if not args.send:
         print('PREVIEW ONLY: article generated, email not sent')
         return
-    keys = ('BLOGGER_MAIL_TO', 'SMTP_USER', 'SMTP_PASSWORD', 'SMTP_HOST')
+    keys = ('BLOGGER_POST_EMAIL', 'SMTP_USERNAME', 'SMTP_PASSWORD')
     missing = [k for k in keys if not os.getenv(k)]
     if missing:
         raise ValueError('Missing email configuration: ' + ', '.join(missing))
-    host = os.environ['SMTP_HOST']
-    port = int(os.getenv('SMTP_PORT', '465'))
-    if port != 465:
-        raise ValueError('This script supports SMTP over SSL port 465 only')
+    host = (os.getenv('SMTP_HOST') or 'smtp.gmail.com').strip()
+    port = int((os.getenv('SMTP_PORT') or '465').strip())
+    if port not in (465, 587):
+        raise ValueError('SMTP_PORT must be 465 (SSL) or 587 (STARTTLS)')
+    sender = os.environ['SMTP_USERNAME'].strip()
+    recipient = os.environ['BLOGGER_POST_EMAIL'].strip()
+    for name, address in (('SMTP_USERNAME', sender), ('BLOGGER_POST_EMAIL', recipient)):
+        _, parsed = parseaddr(address)
+        if parsed != address or '@' not in address or any(c in address for c in ('\r', '\n', ' ')):
+            raise ValueError(f'Invalid email address in {name}')
+    if not recipient.lower().endswith('@blogger.com'):
+        raise ValueError('BLOGGER_POST_EMAIL must be a @blogger.com posting address')
     msg = EmailMessage()
     msg['Subject'] = title
-    msg['From'] = os.environ['SMTP_USER']
-    msg['To'] = os.environ['BLOGGER_MAIL_TO']
+    msg['From'] = sender
+    msg['To'] = recipient
     msg.set_content('このメールはHTML形式の競馬予想記事です。')
     msg.add_alternative(body, subtype='html')
-    with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=30) as smtp:
-        smtp.login(os.environ['SMTP_USER'], os.environ['SMTP_PASSWORD'])
-        smtp.send_message(msg)
+    if port == 465:
+        with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=30) as smtp:
+            smtp.login(sender, os.environ['SMTP_PASSWORD'])
+            smtp.send_message(msg)
+    else:
+        with smtplib.SMTP(host, port, timeout=30) as smtp:
+            smtp.ehlo()
+            smtp.starttls(context=ssl.create_default_context())
+            smtp.ehlo()
+            smtp.login(sender, os.environ['SMTP_PASSWORD'])
+            smtp.send_message(msg)
     print('Blog article email accepted by SMTP server (Blogger publication must be checked separately)')
 
 if __name__ == '__main__':
