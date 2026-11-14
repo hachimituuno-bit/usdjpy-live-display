@@ -15,11 +15,11 @@ VENUES = ('福島', '東京', '京都', '札幌', '函館', '新潟', '中山', 
 
 def build(base=BASE):
     summary = json.loads((base / 'run_summary.json').read_text(encoding='utf-8'))
-    if summary.get('status') != 'SUCCESS' or summary.get('failed'):
+    if summary.get('status') != 'COMPLETE_WITH_HOLDS' or summary.get('failed'):
         raise ValueError('Predictions not fully successful; blog post stopped')
     day = date.fromisoformat(summary['date'])
-    expected = set(summary['predicted'])
-    if len(expected) != len(summary['predicted']):
+    expected = set(summary['predicted']) | {h['race'] for h in summary.get('held', [])}
+    if len(expected) != len(summary['predicted']) + len(summary.get('held', [])):
         raise ValueError('Duplicate race names in summary')
     # Auto mode must be a complete meeting: each venue exactly 1R..12R.
     if summary.get('mode') != 'auto' or len(expected) != 36:
@@ -38,6 +38,10 @@ def build(base=BASE):
             data = json.loads(p.read_text(encoding='utf-8'))
             if data.get('race_date') != day.isoformat() or data.get('venue') != venue or data.get('race_number') != n:
                 raise ValueError(f'Mismatched prediction data: {p}')
+            reason=data.get('hold_reason')
+            if reason:
+                parts.append(f'<section style="padding:13px 0;border-bottom:1px solid #d5dbe2"><h3 style="font-size:21px;margin:0">{n}R</h3><div style="font-size:22px;font-weight:700">予想保留</div><div style="font-size:15px;color:#606b78">{html.escape(reason)}</div></section>')
+                continue
             horses = data['horses']
             scored = sorted((h for h in horses if h.get('form_score') is not None and h.get('rank') is not None), key=lambda h: h['rank'])
             top = scored[:3]

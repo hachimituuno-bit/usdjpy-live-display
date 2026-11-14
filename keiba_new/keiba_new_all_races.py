@@ -78,7 +78,7 @@ def main():
     a=ap.parse_args();day=date.fromisoformat(a.date) if a.date else datetime.now(JST).date()
     if day<datetime.now(JST).date():raise ValueError('過去日の新規予想は禁止')
     BASE.mkdir(exist_ok=True)
-    summary={'date':day.isoformat(),'mode':'auto','status':'FAILED','predicted':[],'failed':[],'source':'Yahoo!競馬','coefficient':0.5}
+    summary={'date':day.isoformat(),'mode':'auto','status':'FAILED','predicted':[],'held':[],'failed':[],'source':'Yahoo!競馬','coefficient':0.5}
     try:
         ids,errors=race_links(day)
         summary['discovery_errors']=errors
@@ -102,23 +102,39 @@ def main():
                     surface,distance=condition(soup,rid)
                     horses=extract(response.text)
                     ranked=rank_new(horses,venue,surface,distance,day)
-                    if len([h for h in ranked if h['rank'] is not None])<3:raise ValueError('評価可能な馬が3頭未満')
-                    data={'race_date':day.isoformat(),'venue':venue,'race_number':n,'race_id':rid,'surface':surface,'distance_m':distance,'horses':ranked,'coefficient':0.5}
+                    scored_count=sum(h['rank'] is not None for h in ranked)
+                    hold_reason='過去走データ不足（評価可能な馬が3頭未満）' if scored_count<3 else None
+                    data={'race_date':day.isoformat(),'venue':venue,'race_number':n,'race_id':rid,'surface':surface,'distance_m':distance,'horses':ranked,'coefficient':0.5,'hold_reason':hold_reason}
                     dest=BASE/f'{venue}_{n:02d}R';dest.mkdir(exist_ok=True)
                     (dest/'prediction.json').write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf-8')
-                    summary['predicted'].append(f'{venue}{n}R')
-                    print('OK',venue,n,'R',surface,distance,'m',flush=True)
+                    if hold_reason:
+                        summary['held'].append({'race_id':rid,'race':f'{venue}{n}R','reason':hold_reason})
+                        print('HOLD',venue,n,'R',hold_reason,flush=True)
+                    else:
+                        summary['predicted'].append(f'{venue}{n}R')
+                        print('OK',venue,n,'R',surface,distance,'m',flush=True)
+                except ValueError as e:
+                    if '障害レースは平地用モデルの対象外' in str(e):
+                        reason='障害レース（平地モデル対象外）'
+                        dest=BASE/f'{venue}_{n:02d}R';dest.mkdir(exist_ok=True)
+                        data={'race_date':day.isoformat(),'venue':venue,'race_number':n,'race_id':rid,'horses':[],'coefficient':0.5,'hold_reason':reason}
+                        (dest/'prediction.json').write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf-8')
+                        summary['held'].append({'race_id':rid,'race':f'{venue}{n}R','reason':reason})
+                        print('HOLD',venue,n,'R',reason,flush=True)
+                    else:
+                        summary['failed'].append({'race_id':rid,'error':str(e)})
+                        print('FAILED',rid,str(e),flush=True)
                 except Exception as e:
                     summary['failed'].append({'race_id':rid,'error':str(e)})
                     print('FAILED',rid,str(e),flush=True)
                 time.sleep(max(0.5,a.delay))
-        summary['status']='SUCCESS' if len(summary['predicted'])==36 and not summary['failed'] else 'PARTIAL'
+        summary['status']='COMPLETE_WITH_HOLDS' if len(summary['predicted'])+len(summary['held'])==36 and not summary['failed'] else 'PARTIAL'
     except Exception as e:
         summary['failed'].append({'error':str(e)})
     finally:
         (BASE/'run_summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf-8')
         print('SUMMARY',json.dumps(summary,ensure_ascii=False),flush=True)
-    return 0 if summary['status']=='SUCCESS' else 1
+    return 0 if summary['status']=='COMPLETE_WITH_HOLDS' else 1
 if __name__=='__main__':
     try:sys.exit(main())
     except Exception as e:print('ERROR',e,file=sys.stderr);sys.exit(1)
