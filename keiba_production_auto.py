@@ -76,81 +76,60 @@ def race_metadata(soup, day, rid, expected_venue=''):
         raise ValueError('Not verified as an entry page '+rid)
     return venue,number
 
-def entries_from_table(soup,rid):
-    """Read entrant names/horse numbers only from the same table row.
-    Try common Yahoo formats: explicit horse-number cell or frame+horse-number.
-    """
-    candidates=[]
-    for table in soup.select('table'):
-        horses=[]; seen=set(); ids=set()
-        for tr in table.select('tr'):
-            anchors=[a for a in tr.select('a[href]') if re.search(r'/keiba/horse/(\d+)',a['href'])]
-            if len(anchors)!=1: continue
-            a=anchors[0]; name=a.get_text(' ',strip=True)
-            match=re.search(r'/keiba/horse/(\d+)',a['href'])
-            if not name or not match: continue
-            cells=tr.find_all(['td','th'],recursive=False)
-            digits=[]
-            for c in cells[:5]:
-                val=c.get_text(' ',strip=True)
-                if re.fullmatch(r'\d{1,2}',val):digits.append(int(val))
-            if len(digits)<2:continue
-            num=digits[1]
-            if not 1<=num<=18 or num in seen or match[1] in ids: continue
-            seen.add(num);ids.add(match[1])
-            horses.append({'number':num,'name':name,'identity_candidate':'yahoo:'+match[1],
-                           'horse_url':'https://sports.yahoo.co.jp/keiba/horse/'+match[1]})
-        if len(horses)>len(candidates):candidates=horses
-    if len(candidates)<2:
-        DIAG.mkdir(parents=True,exist_ok=True)
-        if len(_saved_diagnostics)<2 and rid not in _saved_diagnostics:
-            _saved_diagnostics.add(rid)
-            (DIAG/f'{rid}_entry_page.html').write_text(str(soup),encoding='utf-8')
-            horse_links=[{'text':a.get_text(' ',strip=True)[:100], 'href':a.get('href','')[:250]} for a in soup.select('a[href]') if '/keiba/horse/' in a.get('href','')]
-            tables=[{'rows':len(t.select('tr')),'first_rows':[r.get_text(' ',strip=True)[:350] for r in t.select('tr')[:3]]} for t in soup.select('table')[:8]]
-            (DIAG/f'{rid}_structure.json').write_text(json.dumps({'race_id':rid,'title':soup.title.get_text(' ',strip=True) if soup.title else '', 'table_count':len(soup.select('table')),'horse_link_count':len(horse_links),'horse_links':horse_links[:15],'tables':tables,'html_size':len(str(soup))},ensure_ascii=False,indent=2),encoding='utf-8')
-        raise ValueError(f'Cannot verify entrant rows for {rid} (found {len(candidates)}); diagnostic saved')
-    return sorted(candidates,key=lambda h:h['number'])
+def entries_and_history(soup, rid, day):
+    """Parse Yahoo's two aligned tables from a single saved entry page.
 
-def history_from_yahoo(entry,day):
-    soup=get(entry['horse_url']); text=soup.get_text(' ',strip=True)
-    if entry['name'] not in text[:1600]:raise ValueError('Horse name/profile mismatch: '+entry['name'])
-    runs=[]
-    for table in soup.select('table'):
-        headers=[c.get_text(' ',strip=True) for c in table.select('thead th')]
-        # Yahoo may publish finishing position and runners in separate columns.
-        date_idx=next((i for i,h in enumerate(headers) if '日付' in h or '年月日' in h),None)
-        finish_idx=next((i for i,h in enumerate(headers) if h in ('着順','着')),None)
-        field_idx=next((i for i,h in enumerate(headers) if h in ('頭数','出走頭数')),None)
-        for tr in table.select('tr'):
-            cells=[c.get_text(' ',strip=True) for c in tr.find_all(['td','th'],recursive=False)]
-            if len(cells)<4:continue
-            dates=[]
-            search_cells=[cells[date_idx]] if date_idx is not None and date_idx<len(cells) else cells[:3]
-            for cell in search_cells:
-                m=re.search(r'(20\d{2})[./年](\d{1,2})[./月](\d{1,2})',cell)
-                if m:
-                    try:dates.append(date(*map(int,m.groups())))
-                    except ValueError:pass
-            if len(dates)!=1 or dates[0]>=day:continue
-            finish=field=None
-            if finish_idx is not None and field_idx is not None and max(finish_idx,field_idx)<len(cells):
-                a,b=cells[finish_idx],cells[field_idx]
-                if re.fullmatch(r'\d{1,2}',a) and re.fullmatch(r'\d{1,2}',b):finish,field=int(a),int(b)
-            if finish is None:
-                pairs=[re.fullmatch(r'\s*(\d{1,2})\s*[/／]\s*(\d{1,2})\s*',c) for c in cells]
-                pairs=[m for m in pairs if m]
-                if len(pairs)==1:finish,field=map(int,pairs[0].groups())
-            if finish is not None and 1<=finish<=field<=18:
-                runs.append({'date':dates[0].isoformat(),'finish':finish,'field_size':field,'finish_status':'finished'})
-    unique={}
-    for r in runs:
-        if r['date'] in unique and unique[r['date']]!=r:raise ValueError('Conflicting historical data: '+entry['name'])
-        unique[r['date']]=r
-    runs=sorted(unique.values(),key=lambda r:r['date'],reverse=True)[:5]
-    if not runs:raise ValueError('No verified historical finish/field-size data for '+entry['name'])
-    return {'name':entry['name'],'identity_candidate':entry['identity_candidate'],
-            'identity_verified':False,'runs':runs,'available_runs':len(runs)}
+    Never infer finish from odds/popularity. Every historical result needs
+    its own date, finishing position and verified field size.
+    """
+    entry_table=soup.select_one('table.hr-tableScrollFix')
+    form_table=soup.select_one('table.hr-tableScroll')
+    if not entry_table or not form_table:
+        raise ValueError(f'Missing paired Yahoo entry/form tables for {rid}')
+    entry_rows=entry_table.select('tr')[1:]
+    form_rows=form_table.select('tr')[1:]
+    if len(entry_rows)!=len(form_rows) or not (2<=len(entry_rows)<=18):
+        raise ValueError(f'Misaligned entrant/form rows: {len(entry_rows)}/{len(form_rows)}')
+    horses=[]; histories=[]; numbers=set(); identities=set()
+    for row,form in zip(entry_rows,form_rows):
+        num_node=row.select_one('.hr-denma__number')
+        name_link=row.select_one('a[href^="/keiba/directory/horse/"]')
+        if num_node is None or name_link is None:
+            raise ValueError('Missing number/name in an entrant row')
+        number_text=num_node.get_text(' ',strip=True)
+        m=re.fullmatch(r'/keiba/directory/horse/(\d+)/?',name_link.get('href',''))
+        if not re.fullmatch(r'\d{1,2}',number_text) or not m:
+            raise ValueError('Invalid number or horse profile URL')
+        number=int(number_text); name=name_link.get_text(' ',strip=True)
+        cid='yahoo:'+m.group(1)
+        if not 1<=number<=18 or not name or number in numbers or cid in identities:
+            raise ValueError('Duplicate or invalid horse identity/number')
+        numbers.add(number);identities.add(cid)
+        horses.append({'number':number,'name':name,'identity_candidate':cid,
+                       'horse_url':'https://sports.yahoo.co.jp'+m.group(0)})
+        runs=[]
+        for cell in form.select('td.hr-denma__third, td.hr-tableScroll__data--race'):
+            date_node=cell.select_one('p.hr-denma__date span')
+            finish_node=cell.select_one('.hr-denma__arrival')
+            if not date_node or not finish_node:continue
+            date_match=re.fullmatch(r'(20\d{2})/(\d{1,2})/(\d{1,2})',date_node.get_text(' ',strip=True))
+            finish_text=finish_node.get_text(' ',strip=True)
+            field_match=re.search(r'(?<!\d)(\d{1,2})頭',cell.get_text(' ',strip=True))
+            if not date_match or not re.fullmatch(r'\d{1,2}',finish_text) or not field_match:continue
+            try:run_day=date(*map(int,date_match.groups()))
+            except ValueError:continue
+            finish=int(finish_text); field=int(field_match.group(1))
+            if run_day>=day or not 1<=finish<=field<=18:continue
+            runs.append({'date':run_day.isoformat(),'finish':finish,'field_size':field,'finish_status':'finished'})
+        dates=[r['date'] for r in runs]
+        if len(dates)!=len(set(dates)):
+            raise ValueError('Duplicate historical race dates: '+name)
+        runs=sorted(runs,key=lambda x:x['date'],reverse=True)[:5]
+        histories.append({'name':name,'identity_candidate':cid,'identity_verified':False,
+                          'runs':runs,'available_runs':len(runs)})
+    if sorted(numbers)!=list(range(1,len(horses)+1)):
+        raise ValueError('Entrant numbers not contiguous; possible incomplete page')
+    return sorted(horses,key=lambda x:x['number']),histories
 
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--mode',choices=['auto','manual'],default='auto');ap.add_argument('--date',default='');ap.add_argument('--venue',default='');ap.add_argument('--race',type=int,default=0)
@@ -165,8 +144,9 @@ def main():
             try:
                 soup=get(url);venue,num=race_metadata(soup,day,rid)
                 if a.mode=='manual' and (venue!=a.venue or num!=a.race):continue
-                entries={'race_date':day.isoformat(),'venue':venue,'race_number':num,'race_name':f'{venue}{num}R','posting':False,'horses':entries_from_table(soup,rid)}
-                history={'target_date':day.isoformat(),'posting':False,'horses':[history_from_yahoo(h,day) for h in entries['horses']]}
+                horses,form=entries_and_history(soup,rid,day)
+                entries={'race_date':day.isoformat(),'venue':venue,'race_number':num,'race_name':f'{venue}{num}R','posting':False,'horses':horses}
+                history={'target_date':day.isoformat(),'posting':False,'horses':form}
                 prediction=rank(entries,history)
                 directory=OUT/f'{venue}_{num:02d}R';directory.mkdir(exist_ok=True)
                 for filename,obj in [('entries.json',entries),('history.json',history),('prediction.json',prediction)]:
@@ -177,9 +157,6 @@ def main():
             except Exception as e:
                 summary['failed'].append({'race_id':rid,'error':str(e)})
                 print('FAILED',rid,str(e),flush=True)
-                if len(_saved_diagnostics)>=2:
-                    summary['notes'].append('Stopped after two HTML snapshots; inspect diagnostics artifact before further changes')
-                    break
         summary['status']='SUCCESS' if summary['predicted'] and not summary['failed'] else ('PARTIAL' if summary['predicted'] else 'FAILED')
         if a.mode=='manual' and not summary['predicted']:summary['notes'].append('Requested venue/race not successfully predicted')
     except Exception as e:summary['notes'].append(str(e));print('ERROR',str(e),flush=True)
