@@ -1,0 +1,46 @@
+name: Keiba NEW prediction (independent)
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'true = SMTP send, false = preview only (default)'
+        type: choice
+        required: true
+        default: 'false'
+        options: ['false', 'true']
+permissions:
+  contents: read
+concurrency:
+  group: keiba-new-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  new-prediction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install requirements
+        run: python -m pip install 'requests>=2.31,<3' 'beautifulsoup4>=4.12,<5'
+      - name: Render new method preview (no posting)
+        run: python keiba_new/keiba_new_publish.py --snapshot keiba_new/forward_tokyo_20261115_11R.json --start 15:20 --output keiba_new_preview.html
+      - name: Send NEW method article by Mail2Blogger (explicit opt-in)
+        if: ${{ inputs.publish == 'true' }}
+        env:
+          BLOGGER_POST_EMAIL: ${{ secrets.BLOGGER_POST_EMAIL }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+        run: python keiba_new/keiba_new_publish.py --snapshot keiba_new/forward_tokyo_20261115_11R.json --start 15:20 --output keiba_new_preview.html --send
+      - name: Upload new-method preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-new-${{ github.run_id }}
+          path: |
+            keiba_new_preview.html
+            keiba_new_preview.smtp-accepted.json
+          if-no-files-found: warn
