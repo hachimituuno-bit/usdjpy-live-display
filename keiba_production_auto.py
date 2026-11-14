@@ -19,7 +19,7 @@ def get(url):
 def race_links(day):
     # Yahoo race IDs: YY + 2-digit venue code + 2-digit meeting + 2-digit day + 2-digit race
     # Discover links rather than inventing meeting/day codes.
-    seeds=[f'https://sports.yahoo.co.jp/keiba/race/list/{day:%Y%m%d}', 'https://sports.yahoo.co.jp/keiba/']
+    seeds=[f'https://sports.yahoo.co.jp/keiba/race/list/{day:%Y%m%d}']
     found={};errors=[]
     for url in seeds:
         try:
@@ -31,57 +31,87 @@ def race_links(day):
         except Exception as e:errors.append(str(e))
     return found,errors
 
-def race_metadata(soup,day,rid):
-    text=soup.get_text(' ',strip=True);title=soup.title.get_text(' ',strip=True) if soup.title else ''
-    # Require date and venue on the page, not just in the race ID.
-    date_ok=bool(re.search(rf'{day.year}年\s*{day.month}月\s*{day.day}日',text))
-    venue=next((v for v in VENUES if v in title),None)
-    if not venue:venue=next((v for v in VENUES if v in text[:650]),None)
-    if not date_ok or not venue:raise ValueError(f'Race date/venue unverified: {rid}, title={title[:90]}')
-    return venue,int(rid[-2:])
+def race_metadata(soup, day, rid, expected_venue=''):
+    """Race ID identifies venue (JRA venue codes), meeting/day and race number.
+    Date must be verified on the DATE-SPECIFIC list page, not inferred from the race ID.
+    """
+    codes={'01':'札幌','02':'函館','03':'福島','04':'新潟','05':'東京',
+           '06':'中山','07':'中京','08':'京都','09':'阪神','10':'小倉'}
+    venue=codes.get(rid[2:4]); number=int(rid[-2:])
+    if not venue or not 1<=number<=12: raise ValueError('Invalid race ID '+rid)
+    if expected_venue and venue!=expected_venue: raise ValueError('Venue mismatch '+rid)
+    title=soup.title.get_text(' ',strip=True) if soup.title else ''
+    if '出馬表' not in title and '出走表' not in title and '出馬表' not in soup.get_text(' ',strip=True)[:2000]:
+        raise ValueError('Not verified as an entry page '+rid)
+    return venue,number
 
 def entries_from_table(soup,rid):
-    # Match horse link to horse number within the SAME table row.
+    """Read entrant names/horse numbers only from the same table row.
+    Try common Yahoo formats: explicit horse-number cell or frame+horse-number.
+    """
     candidates=[]
     for table in soup.select('table'):
-        horses=[];seen=set()
+        horses=[]; seen=set(); ids=set()
         for tr in table.select('tr'):
-            anchors=[a for a in tr.select('a[href]') if re.search(r'/keiba/horse/\d+',a['href'])]
-            if len(anchors)!=1:continue
-            a=anchors[0];name=a.get_text(' ',strip=True);m=re.search(r'/keiba/horse/(\d+)',a['href'])
-            cells=[c.get_text(' ',strip=True) for c in tr.find_all(['td','th'],recursive=False)]
-            # Horse number is typically the second numeric cell (after frame number).
-            digits=[int(x) for x in cells[:4] if re.fullmatch(r'\d{1,2}',x)]
-            if not digits or not name:continue
-            num=digits[1] if len(digits)>=2 else digits[0]
-            if not 1<=num<=18 or num in seen:continue
-            seen.add(num);horses.append({'number':num,'name':name,'identity_candidate':'yahoo:'+m.group(1),'horse_url':'https://sports.yahoo.co.jp/keiba/horse/'+m.group(1)})
+            anchors=[a for a in tr.select('a[href]') if re.search(r'/keiba/horse/(\d+)',a['href'])]
+            if len(anchors)!=1: continue
+            a=anchors[0]; name=a.get_text(' ',strip=True)
+            match=re.search(r'/keiba/horse/(\d+)',a['href'])
+            if not name or not match: continue
+            cells=tr.find_all(['td','th'],recursive=False)
+            digits=[]
+            for c in cells[:5]:
+                val=c.get_text(' ',strip=True)
+                if re.fullmatch(r'\d{1,2}',val):digits.append(int(val))
+            if len(digits)<2:continue
+            num=digits[1]
+            if not 1<=num<=18 or num in seen or match[1] in ids: continue
+            seen.add(num);ids.add(match[1])
+            horses.append({'number':num,'name':name,'identity_candidate':'yahoo:'+match[1],
+                           'horse_url':'https://sports.yahoo.co.jp/keiba/horse/'+match[1]})
         if len(horses)>len(candidates):candidates=horses
     if len(candidates)<2:raise ValueError(f'Cannot verify entrant rows for {rid} (found {len(candidates)})')
     return sorted(candidates,key=lambda h:h['number'])
 
 def history_from_yahoo(entry,day):
-    soup=get(entry['horse_url'])
-    if entry['name'] not in soup.get_text(' ',strip=True)[:900]:
-        raise ValueError('Horse name/profile mismatch: '+entry['name'])
+    soup=get(entry['horse_url']); text=soup.get_text(' ',strip=True)
+    if entry['name'] not in text[:1600]:raise ValueError('Horse name/profile mismatch: '+entry['name'])
     runs=[]
-    for tr in soup.select('tr'):
-        cells=[c.get_text(' ',strip=True) for c in tr.find_all(['td','th'],recursive=False)]
-        if len(cells)<5:continue
-        match=next((re.search(r'(20\d{2})[./年](\d{1,2})[./月](\d{1,2})',c) for c in cells[:3] if re.search(r'20\d{2}',c)),None)
-        if not match:continue
-        try:d=date(int(match[1]),int(match[2]),int(match[3]))
-        except ValueError:continue
-        if d>=day:continue
-        # Accept finish and field size ONLY when both can be identified in a single result cell (e.g. 3/16).
-        # Do not guess from unrelated numeric columns such as popularity or horse number.
-        paired=next((re.fullmatch(r'\s*(\d{1,2})\s*[/／]\s*(\d{1,2})\s*',c) for c in cells if re.fullmatch(r'\s*\d{1,2}\s*[/／]\s*\d{1,2}\s*',c)),None)
-        if paired:
-            finish,field=map(int,paired.groups())
-            if 1<=finish<=field<=18:runs.append({'date':d.isoformat(),'finish':finish,'field_size':field,'finish_status':'finished'})
-    runs=sorted({r['date']:r for r in runs}.values(),key=lambda r:r['date'],reverse=True)[:5]
-    if not runs:raise ValueError('No unambiguous historical finish/field-size pairs for '+entry['name'])
-    return {'name':entry['name'],'identity_candidate':entry['identity_candidate'],'identity_verified':False,'runs':runs,'available_runs':len(runs)}
+    for table in soup.select('table'):
+        headers=[c.get_text(' ',strip=True) for c in table.select('thead th')]
+        # Yahoo may publish finishing position and runners in separate columns.
+        date_idx=next((i for i,h in enumerate(headers) if '日付' in h or '年月日' in h),None)
+        finish_idx=next((i for i,h in enumerate(headers) if h in ('着順','着')),None)
+        field_idx=next((i for i,h in enumerate(headers) if h in ('頭数','出走頭数')),None)
+        for tr in table.select('tr'):
+            cells=[c.get_text(' ',strip=True) for c in tr.find_all(['td','th'],recursive=False)]
+            if len(cells)<4:continue
+            dates=[]
+            search_cells=[cells[date_idx]] if date_idx is not None and date_idx<len(cells) else cells[:3]
+            for cell in search_cells:
+                m=re.search(r'(20\d{2})[./年](\d{1,2})[./月](\d{1,2})',cell)
+                if m:
+                    try:dates.append(date(*map(int,m.groups())))
+                    except ValueError:pass
+            if len(dates)!=1 or dates[0]>=day:continue
+            finish=field=None
+            if finish_idx is not None and field_idx is not None and max(finish_idx,field_idx)<len(cells):
+                a,b=cells[finish_idx],cells[field_idx]
+                if re.fullmatch(r'\d{1,2}',a) and re.fullmatch(r'\d{1,2}',b):finish,field=int(a),int(b)
+            if finish is None:
+                pairs=[re.fullmatch(r'\s*(\d{1,2})\s*[/／]\s*(\d{1,2})\s*',c) for c in cells]
+                pairs=[m for m in pairs if m]
+                if len(pairs)==1:finish,field=map(int,pairs[0].groups())
+            if finish is not None and 1<=finish<=field<=18:
+                runs.append({'date':dates[0].isoformat(),'finish':finish,'field_size':field,'finish_status':'finished'})
+    unique={}
+    for r in runs:
+        if r['date'] in unique and unique[r['date']]!=r:raise ValueError('Conflicting historical data: '+entry['name'])
+        unique[r['date']]=r
+    runs=sorted(unique.values(),key=lambda r:r['date'],reverse=True)[:5]
+    if not runs:raise ValueError('No verified historical finish/field-size data for '+entry['name'])
+    return {'name':entry['name'],'identity_candidate':entry['identity_candidate'],
+            'identity_verified':False,'runs':runs,'available_runs':len(runs)}
 
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--mode',choices=['auto','manual'],default='auto');ap.add_argument('--date',default='');ap.add_argument('--venue',default='');ap.add_argument('--race',type=int,default=0)
@@ -89,7 +119,7 @@ def main():
     summary={'date':day.isoformat(),'mode':a.mode,'source':'Yahoo!競馬','status':'FAILED','predicted':[],'failed':[],'notes':[]}
     try:
         ids,errors=race_links(day);summary['discovery_errors']=errors;summary['discovered_race_ids']=sorted(ids)
-        if not ids:raise RuntimeError('Yahoo race list yielded no verified race links; do not claim success')
+        if not ids:raise RuntimeError('Yahoo date-specific race list yielded no race links; do not claim success')
         for rid,url in sorted(ids.items()):
             try:
                 soup=get(url);venue,num=race_metadata(soup,day,rid)
