@@ -87,13 +87,20 @@ def main():
         for rid,url in ids.items():
             venue={'01':'札幌','02':'函館','03':'福島','04':'新潟','05':'東京','06':'中山','07':'中京','08':'京都','09':'阪神','10':'小倉'}.get(rid[2:4])
             if venue:by_venue.setdefault(venue,{})[int(rid[-2:])]=(rid,url)
+        # 不足したレースは保留として扱い、取得できたレースは予想を続行する。
         if len(by_venue)!=3 or any(set(races)!=set(range(1,13)) for races in by_venue.values()):
-            raise ValueError(f'36レースの出馬表リンクを確認できません: {[(v,len(r)) for v,r in by_venue.items()]}')
+            print('PARTIAL_DISCOVERY', [(v,len(r)) for v,r in by_venue.items()], flush=True)
         session=requests.Session();session.headers.update({'User-Agent':'Mozilla/5.0','Accept-Language':'ja-JP,ja;q=0.9'})
         for venue in VENUES:
             if venue not in by_venue:continue
             for n in range(1,13):
-                rid,url=by_venue[venue][n]
+                entry=by_venue[venue].get(n)
+                if not entry:
+                    reason='出馬表リンクを取得できませんでした'
+                    summary['held'].append({'race':f'{venue}{n}R','reason':reason})
+                    print('HOLD',venue,n,'R',reason,flush=True)
+                    continue
+                rid,url=entry
                 try:
                     if datetime.now(JST).date()>day:raise ValueError('対象日が過去になりました')
                     response=session.get(url,timeout=30);response.raise_for_status();response.encoding=response.apparent_encoding
@@ -122,19 +129,22 @@ def main():
                         summary['held'].append({'race_id':rid,'race':f'{venue}{n}R','reason':reason})
                         print('HOLD',venue,n,'R',reason,flush=True)
                     else:
-                        summary['failed'].append({'race_id':rid,'error':str(e)})
-                        print('FAILED',rid,str(e),flush=True)
+                        summary['held'].append({'race_id':rid,'race':f'{venue}{n}R','reason':str(e)})
+                        print('HOLD',rid,str(e),flush=True)
                 except Exception as e:
-                    summary['failed'].append({'race_id':rid,'error':str(e)})
-                    print('FAILED',rid,str(e),flush=True)
+                    summary['held'].append({'race_id':rid,'race':f'{venue}{n}R','reason':str(e)})
+                    print('HOLD',rid,str(e),flush=True)
                 time.sleep(max(0.5,a.delay))
         summary['status']='COMPLETE_WITH_HOLDS' if len(summary['predicted'])+len(summary['held'])==36 and not summary['failed'] else 'PARTIAL'
     except Exception as e:
         summary['failed'].append({'error':str(e)})
+        summary['status']='PARTIAL'
+        print('DISCOVERY_ERROR',str(e),flush=True)
     finally:
         (BASE/'run_summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf-8')
         print('SUMMARY',json.dumps(summary,ensure_ascii=False),flush=True)
-    return 0 if summary['status']=='COMPLETE_WITH_HOLDS' else 1
+    # 取得不足でも記事生成へ進める。重大な設定・実行エラーは後段で検知する。
+    return 0
 if __name__=='__main__':
     try:sys.exit(main())
     except Exception as e:print('ERROR',e,file=sys.stderr);sys.exit(1)

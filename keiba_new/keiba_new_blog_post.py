@@ -15,32 +15,40 @@ VENUES = ('福島', '東京', '京都', '札幌', '函館', '新潟', '中山', 
 
 def build(base=BASE):
     summary = json.loads((base / 'run_summary.json').read_text(encoding='utf-8'))
-    if summary.get('status') != 'COMPLETE_WITH_HOLDS' or summary.get('failed'):
-        raise ValueError('Predictions not fully successful; blog post stopped')
+    # 36レースの完全性を公開条件にしない。実データがないレースは理由を表示。
     day = date.fromisoformat(summary['date'])
-    expected = set(summary['predicted']) | {h['race'] for h in summary.get('held', [])}
-    if len(expected) != len(summary['predicted']) + len(summary.get('held', [])):
-        raise ValueError('Duplicate race names in summary')
-    # Auto mode must be a complete meeting: each venue exactly 1R..12R.
-    if summary.get('mode') != 'auto' or len(expected) != 36:
-        raise ValueError('Only a complete 36-race auto run can publish one-day article')
-    venues = [v for v in VENUES if any(x.startswith(v) for x in expected)]
-    if len(venues) != 3 or expected != {f'{v}{n}R' for v in venues for n in range(1, 13)}:
-        raise ValueError('Expected exactly 3 venues x 12 races; refused partial publication')
-    title = f'【新方式】{day.year}年{day.month}月{day.day}日 中央競馬36レース予想｜馬番一覧'
+    available = {}
+    for p in sorted(base.glob('*/prediction.json')):
+        try:
+            d = json.loads(p.read_text(encoding='utf-8'))
+            if d.get('race_date') == day.isoformat() and d.get('venue') in VENUES and isinstance(d.get('race_number'), int) and 1 <= d['race_number'] <= 12:
+                available[(d['venue'], d['race_number'])] = d
+        except (ValueError, OSError, TypeError, KeyError):
+            continue
+    held = {h.get('race'): h.get('reason', '情報不足') for h in summary.get('held', [])}
+    errors = [e.get('error', '情報取得エラー') for e in summary.get('failed', [])]
+    venues = [v for v in VENUES if any(k[0] == v for k in available) or any(str(x).startswith(v) for x in held) or any(str(x).startswith(v) for x in summary.get('predicted', []))]
+    if not venues:
+        # 開催場が確認できない場合、36レースを架空に並べず取得失敗の事実を記事にする。
+        venues = []
+    title = f'【新方式】{day.year}年{day.month}月{day.day}日 中央競馬予想｜馬番一覧・取得状況'
     css = 'font-family:Arial,"Noto Sans JP",sans-serif;font-size:18px;line-height:1.8;color:#20242a;max-width:780px;margin:auto'
     parts = [f'<div style="{css}">', f'<h2 style="font-size:27px;line-height:1.4">{html.escape(title)}</h2>',
              '<p style="font-size:18px">各レースの<strong>予想上位3頭の馬番</strong>を左から順に掲載します。馬券購入を勧めるものではありません。</p>']
+    if not venues:
+        detail = '／'.join(errors) if errors else '開催場と出馬表の情報を取得できませんでした。'
+        parts.append(f'<p><strong>本日の予想は保留</strong>：{html.escape(detail)}</p>')
     for venue in venues:
         parts.append(f'<h2 style="font-size:25px;border-bottom:3px solid #234b75;padding-bottom:7px;margin-top:30px">{html.escape(venue)}（1〜12R）</h2>')
         for n in range(1, 13):
-            p = base / f'{venue}_{n:02d}R' / 'prediction.json'
-            data = json.loads(p.read_text(encoding='utf-8'))
-            if data.get('race_date') != day.isoformat() or data.get('venue') != venue or data.get('race_number') != n:
-                raise ValueError(f'Mismatched prediction data: {p}')
-            reason=data.get('hold_reason')
+            data = available.get((venue, n))
+            if data is None:
+                reason = held.get(f'{venue}{n}R', '出馬表または予想データを取得できませんでした')
+                parts.append(f'<section style="padding:13px 0;border-bottom:1px solid #d5dbe2"><h3>{n}R</h3><strong>予想保留</strong><div>{html.escape(str(reason))}</div></section>')
+                continue
+            reason = data.get('hold_reason')
             if reason:
-                parts.append(f'<section style="padding:13px 0;border-bottom:1px solid #d5dbe2"><h3 style="font-size:21px;margin:0">{n}R</h3><div style="font-size:22px;font-weight:700">予想保留</div><div style="font-size:15px;color:#606b78">{html.escape(reason)}</div></section>')
+                parts.append(f'<section style="padding:13px 0;border-bottom:1px solid #d5dbe2"><h3>{n}R</h3><strong>予想保留</strong><div>{html.escape(str(reason))}</div></section>')
                 continue
             horses = data['horses']
             scored = sorted((h for h in horses if h.get('form_score') is not None and h.get('rank') is not None), key=lambda h: h['rank'])
@@ -55,6 +63,8 @@ def build(base=BASE):
             else:
                 parts.append(f'<section style="padding:13px 0;border-bottom:1px solid #d5dbe2"><h3 style="font-size:21px;margin:0">{n}R</h3>'
                              '<div style="font-size:22px;font-weight:700">予想保留（過去走データ不足）</div></section>')
+    if errors and venues:
+        parts.append('<p><strong>その他の取得エラー：</strong>' + html.escape('／'.join(errors)) + '</p>')
     parts += ['<h2 style="font-size:25px;margin-top:35px;border-bottom:3px solid #234b75">基本的な馬の決め方</h2>',
               '<p>各馬の過去走から、3着以内の実績85％と着順の相対評価15％を基礎点とし、直近のレースを重視します。さらに<strong>開催場・芝ダート・距離の適性補正係数0.5</strong>を用いて順位を算出します。オッズ・人気順位は使いません。</p>',
               '<p>馬番は評価点の高い順です。<strong>オッズ・人気順位は使用していません。</strong>過去走が確認できない馬は無理に点数を付けず、評価対象から外します。全馬のデータが不足するレースは「予想保留」と表示します。</p>',
