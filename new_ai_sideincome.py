@@ -406,9 +406,11 @@ def main():
             else:
                 print('PREVIEW: 公開は確認しましたが履歴を変更しません')
         else:
-            print('Bloggerの公開を確認できません。重複防止のため新しい記事は送信しません。')
-            print('配信エラーと投稿一覧を確認し、確認待ち状態は自動解除しないでください。')
-        return
+            print('Bloggerの公開を確認できません。投稿は停止せず次の記事を生成します。')
+            print('注意: 前回のメールが遅れて公開されると複数記事になる場合があります。')
+        # Pending publication is not a posting lock. A new manual/scheduled run
+        # must be able to send again, even if the previous email was rejected.
+        # Keep the pending record until a new SMTP receipt replaces it.
 
     # Generate one distinct article. Never assume SMTP acceptance == publication.
     today = datetime.now(JST).date().isoformat()
@@ -437,7 +439,7 @@ def main():
     }
     _save_ai_state(state)
     print('SMTP受付済み・Blogger公開確認待ち。記事履歴はまだ進めません。')
-    print('次回は公開照合のみ行い、確認できない限り再送信しません。')
+    print('次回も手動・自動の新規送信を許可します。')
 
 
 if __name__ == '__main__':

@@ -462,10 +462,23 @@ def _confirm_pending_story(state):
 def publish_story(state, today):
     # Pending message must be reconciled BEFORE any story generation/recovery.
     # This prevents two emails for the same episode.
-    if _confirm_pending_story(state):
-        print('公開済み話数を確定しました。今回は次話を送信しません。')
-        return True
-    sync_story_with_public_blogger(state)
+    # A previous SMTP receipt is not proof of Blogger publication.
+    # Reconcile when possible; otherwise permit re-sending the SAME episode
+    # rather than advancing the plot or blocking manual/scheduled runs.
+    unverified_pending = False
+    if state.get('pending_story_publication'):
+        try:
+            if _confirm_pending_story(state):
+                print('公開済み話数を確定しました。続けて次話を生成します。')
+        except RuntimeError as exc:
+            # Only a publication-not-found condition is safe to retry.
+            # A corrupt/mismatched episode record must not be overwritten.
+            if not str(exc).startswith('小説の公開確認待ち:'):
+                raise
+            unverified_pending = True
+            print('WARNING: 前回の公開未確認。現在の話数を再送信します:', exc)
+    if not unverified_pending:
+        sync_story_with_public_blogger(state)
     number = int(state.get('series_number', 1))
     episode = int(state.get('episode', 1))
     if not 1 <= episode <= 30:
@@ -552,7 +565,7 @@ JSONのみ返す：{{"title":"今回の副題","html":"<p>...</p>","recap":"継�
     }
     save_state(state)
     print(f'第{episode}話はSMTP受付済み・Blogger公開確認待ち。'
-          '次回は公開確認のみ行い、同じ話を再送信しません。')
+          '次回も実行可能です。未公開なら同じ話数を再送信します。')
     return True
 
 
