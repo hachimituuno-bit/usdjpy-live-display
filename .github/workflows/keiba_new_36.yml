@@ -3,8 +3,8 @@ on:
   # Saturday and Sunday 08:30 JST (Friday/Saturday 23:30 UTC)
   schedule:
     - cron: '30 23 * * 5,6'
-    # One-time extra: 2026-11-15 10:30 JST (01:30 UTC)
-    - cron: '30 1 * * 0'
+    # One-time extra: 2026-11-15 11:15 JST (02:15 UTC)
+    - cron: '15 2 * * 0'
   workflow_dispatch:
     inputs:
       date:
@@ -33,7 +33,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           SCHEDULE: ${{ github.event.schedule }}
         run: |
-          if [ "$EVENT_NAME" = "schedule" ] && [ "$SCHEDULE" = "30 1 * * 0" ] && [ "$(TZ=Asia/Tokyo date +%F)" != "2026-11-15" ]; then
+          if [ "$EVENT_NAME" = "schedule" ] && [ "$SCHEDULE" = "15 2 * * 0" ] && [ "$(TZ=Asia/Tokyo date +%F)" != "2026-11-15" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
