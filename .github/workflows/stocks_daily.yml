@@ -31,7 +31,18 @@ jobs:
       - name: Install requirements
         run: python -m pip install -r requirements.txt
       - name: Generate Japan stocks top 3
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
         run: python stocks_generate.py
+      - name: Manual run - send a Blogger article for this field
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          BLOGGER_POST_EMAIL: ${{ secrets.BLOGGER_POST_EMAIL }}
+        run: python market_manual_post.py stocks
+
       - name: Commit stock data
         run: |
           git config user.name 'github-actions[bot]'
@@ -54,3 +65,4 @@ jobs:
           done
           echo 'ERROR: stock data push failed after five attempts.' >&2
           exit 1
+

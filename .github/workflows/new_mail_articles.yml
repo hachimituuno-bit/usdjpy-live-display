@@ -13,10 +13,10 @@ on:
           - story
           - ai
       dry_run:
-        description: 'true=プレビューのみ / false=メール投稿1件'
+        description: 'true=プレビューのみ / false=メール投稿1件（初期値は投稿）'
         required: true
         type: boolean
-        default: true
+        default: false
   schedule:
     # GitHub cron uses UTC. Schedules may be delayed or skipped.
     - cron: '7 3 * * *'    # 雑学 12:07 JST every day

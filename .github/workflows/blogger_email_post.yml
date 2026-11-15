@@ -9,7 +9,7 @@ on:
         description: 'true: preview only / false: send one NEW Blogger email post'
         required: true
         type: boolean
-        default: true
+        default: false
   schedule:
     # GitHub cron below is in UTC; Japanese local time = UTC+9.
     # JST Monday-Friday 07:12-08:57, every 15 minutes.
@@ -38,8 +38,9 @@ jobs:
 
       - name: Preview or email NEW Blogger post (enforce JST window)
         env:
-          # Scheduled runs must send; manual runs default to preview.
+          # Scheduled runs send; manual runs now default to actual email sending.
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
@@ -59,7 +60,7 @@ jobs:
                      (1 <= weekday <= 5 and hour < 7))
           dry_run = os.environ.get('DRY_RUN', 'true').lower() != 'false'
           print(f'日本時間: {now:%Y-%m-%d %H:%M:%S} / dry_run={dry_run}')
-          if not dry_run and not allowed:
+          if os.environ.get('GITHUB_EVENT_NAME') == 'schedule' and not dry_run and not allowed:
               print('投稿禁止時間帯のため、メール送信せず終了します。')
               sys.exit(0)
           subprocess.run([sys.executable, 'mail_to_blogger.py'], check=True)

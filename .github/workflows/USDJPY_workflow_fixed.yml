@@ -36,6 +36,8 @@ jobs:
       - name: Check JST operating window and 5-minute update interval
         id: gate
         shell: bash
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: |
           python3 - <<'PY'
           import json
@@ -52,14 +54,15 @@ jobs:
           w, hour = now.weekday(), now.hour
           paused_weekend = ((w == 5 and hour >= 7) or w == 6 or
                             (w == 0 and hour < 7))
-          allowed = special_weekend or not paused_weekend
+          manual = os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
+          allowed = manual or special_weekend or not paused_weekend
           reason = ('2026 one-time weekend exception' if special_weekend else
                     'normal weekday window' if allowed else
                     'scheduled weekend pause')
 
           # Do not recalculate more often than approximately every 5 min.
           # If Actions is delayed, the next execution can catch up.
-          if allowed:
+          if allowed and not manual:
               path = Path('docs/latest.json')
               if path.exists():
                   try:
@@ -94,12 +97,23 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Generate fresh USDJPY data
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
         if: steps.gate.outputs.run == 'true'
         env:
           # The current fx_generate.py recognizes this existing override.
           # TRUE only in the one-time 2026 weekend; FALSE during normal operation.
           WEEKEND_TEST_MODE: ${{ steps.gate.outputs.weekend_override }}
         run: python fx_generate.py
+
+      - name: Manual run - send a Blogger article for this field
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          BLOGGER_POST_EMAIL: ${{ secrets.BLOGGER_POST_EMAIL }}
+        run: python market_manual_post.py fx
 
       - name: Commit updated data when changed
         if: steps.gate.outputs.run == 'true'
@@ -125,3 +139,4 @@ jobs:
           done
           echo 'ERROR: FX JSON push failed after five attempts.' >&2
           exit 1
+
