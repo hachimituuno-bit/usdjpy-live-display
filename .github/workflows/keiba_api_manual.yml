@@ -1,0 +1,59 @@
+name: Keiba Blogger API (manual, independent)
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'YYYY-MM-DD (blank = today JST)'
+        required: false
+        type: string
+      mode:
+        description: 'preview = no post; draft = Blogger draft; publish = public post'
+        required: true
+        default: preview
+        type: choice
+        options: [preview, draft, publish]
+permissions:
+  contents: read
+jobs:
+  keiba_api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install 'requests>=2.31,<3' 'beautifulsoup4>=4.12,<5'
+      - name: Fetch and score races (existing prediction engine)
+        env:
+          RACE_DATE: ${{ inputs.date }}
+        run: python keiba_new/keiba_new_all_races.py --date "$RACE_DATE"
+      - name: Generate article (same layout as email version)
+        run: python keiba_new/keiba_new_blog_post.py
+      - name: Blogger API preview
+        if: ${{ inputs.mode == 'preview' }}
+        run: python keiba_api/blogger_api.py
+      - name: Blogger API draft
+        if: ${{ inputs.mode == 'draft' }}
+        env:
+          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          BLOGGER_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}
+          BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
+          BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
+        run: python keiba_api/blogger_api.py --publish --draft
+      - name: Blogger API public post
+        if: ${{ inputs.mode == 'publish' }}
+        env:
+          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          BLOGGER_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}
+          BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
+          BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
+        run: python keiba_api/blogger_api.py --publish
+      - name: Upload preview and diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: keiba-api-${{ github.run_id }}
+          path: keiba_new_results/
+          if-no-files-found: warn
