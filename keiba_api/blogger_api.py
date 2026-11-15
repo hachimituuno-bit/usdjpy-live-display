@@ -43,8 +43,29 @@ def access_token():
         with urlopen(req, timeout=35) as response:
             data = json.loads(response.read().decode('utf-8'))
     except HTTPError as exc:
-        # OAuth error details can contain sensitive data; do not print the body.
-        raise RuntimeError(f'OAuth token refresh failed: HTTP {exc.code} (check credentials/consent status)') from None
+        # Only expose the documented OAuth error code, never the raw response,
+        # credentials, tokens, or potentially sensitive error_description.
+        try:
+            error_data = json.loads(exc.read(8192).decode('utf-8', errors='replace'))
+            oauth_error = error_data.get('error', 'unknown')
+            allowed_errors = {
+                'invalid_client', 'invalid_grant', 'invalid_request',
+                'unauthorized_client', 'unsupported_grant_type',
+                'invalid_scope', 'access_denied', 'temporarily_unavailable',
+                'server_error',
+            }
+            if not isinstance(oauth_error, str) or oauth_error not in allowed_errors:
+                oauth_error = 'unknown'
+        except (ValueError, UnicodeError, OSError):
+            oauth_error = 'unknown'
+        hints = {
+            'invalid_client': 'Check that BLOGGER_CLIENT_ID and BLOGGER_CLIENT_SECRET belong to the same OAuth client.',
+            'invalid_grant': 'Check that BLOGGER_REFRESH_TOKEN was issued for this OAuth client and is still valid.',
+            'unauthorized_client': 'Check OAuth client configuration and authorization permissions.',
+            'invalid_request': 'Check OAuth request parameters.',
+        }
+        hint = hints.get(oauth_error, 'Check OAuth credentials, consent status, and token validity.')
+        raise RuntimeError(f'OAuth token refresh failed: HTTP {exc.code}; error={oauth_error}. {hint}') from None
     if not data.get('access_token'):
         raise RuntimeError('OAuth token response did not contain access_token')
     return data['access_token']
