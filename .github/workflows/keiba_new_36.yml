@@ -12,7 +12,7 @@ on:
       publish:
         description: 'true = SMTP send; false = preview only'
         required: true
-        default: 'false'
+        default: 'true'
         type: choice
         options: ['false', 'true']
 permissions:
@@ -35,9 +35,9 @@ jobs:
         env:
           RACE_DATE: ${{ inputs.date }}
         run: python keiba_new/keiba_new_all_races.py --date "$RACE_DATE"
-      - name: Render complete 36-race Blogger article
+      - name: Render available races and explain missing results
         run: python keiba_new/keiba_new_blog_post.py
-      - name: Send complete new-method article (scheduled or explicit manual true)
+      - name: Send available new-method article (scheduled or explicit manual true)
         if: ${{ github.event_name == 'schedule' || inputs.publish == 'true' }}
         env:
           BLOGGER_POST_EMAIL: ${{ secrets.BLOGGER_POST_EMAIL }}
