@@ -460,24 +460,50 @@ def _confirm_pending_story(state):
 
 
 def publish_story(state, today):
-    # Pending message must be reconciled BEFORE any story generation/recovery.
-    # This prevents two emails for the same episode.
-    # A previous SMTP receipt is not proof of Blogger publication.
-    # Reconcile when possible; otherwise permit re-sending the SAME episode
-    # rather than advancing the plot or blocking manual/scheduled runs.
-    unverified_pending = False
-    if state.get('pending_story_publication'):
+    """Never advance a chapter until Blogger publication is verified.
+
+    When a previous email was accepted but not published, resend the exact
+    saved title/body instead of asking Gemini to rewrite that chapter.
+    """
+    pending = state.get('pending_story_publication')
+    if pending:
         try:
-            if _confirm_pending_story(state):
-                print('公開済み話数を確定しました。続けて次話を生成します。')
+            confirmed = _confirm_pending_story(state)
         except RuntimeError as exc:
-            # Only a publication-not-found condition is safe to retry.
-            # A corrupt/mismatched episode record must not be overwritten.
+            # A feed/network failure or inconsistent state must not be
+            # mistaken for an unpublished chapter.
             if not str(exc).startswith('小説の公開確認待ち:'):
                 raise
-            unverified_pending = True
-            print('WARNING: 前回の公開未確認。現在の話数を再送信します:', exc)
-    if not unverified_pending:
+            print('公開が確認できないため同じ話数を再送信します:', exc)
+            pending = state['pending_story_publication']
+            if (int(state.get('episode', 0)) != int(pending.get('episode', -1))
+                    or int(state.get('series_number', 0)) != int(pending.get('series_number', -1))
+                    or not state.get('series')
+                    or state['series'].get('series_title') != pending.get('series_title')):
+                raise RuntimeError('確認待ち話数と連載状態が不一致。送信を停止します。')
+            saved_title = pending.get('title')
+            saved_content = pending.get('content')
+            if saved_title and saved_content:
+                print(f'保存済み第{pending["episode"]}話を同一内容で再送信します')
+                created = post(saved_title, saved_content,
+                               ['連載小説', f'連載小説・{state["series"]["genre"]}'])
+                if not is_preview():
+                    if not str(created.get('id', '')).startswith('smtp-'):
+                        raise RuntimeError('SMTP受付を確認できません。状態を変更しません。')
+                    # Keep the original sent_at_jst for public verification;
+                    # it must not be replaced by each retry's timestamp.
+                    pending['retry_count'] = int(pending.get('retry_count', 0)) + 1
+                    pending['last_retry_at_jst'] = datetime.now(JST).isoformat()
+                    save_state(state)
+                return True
+            # Legacy pending entries lack the original HTML. Regenerate the
+            # same episode ONCE, then store its body for all later retries.
+            print('旧形式の確認待ち記録に本文がないため、同じ話数を一度だけ再生成します。')
+        else:
+            if confirmed:
+                print('公開済み話数を確定しました。次話は次回の実行で投稿します。')
+                return True
+    else:
         sync_story_with_public_blogger(state)
     number = int(state.get('series_number', 1))
     episode = int(state.get('episode', 1))
@@ -560,12 +586,14 @@ JSONのみ返す：{{"title":"今回の副題","html":"<p>...</p>","recap":"継�
         'series_number': number,
         'episode': episode,
         'recap': str(result['recap']),
+        'content': content,
+        'retry_count': 0,
         'sent_at_jst': datetime.now(JST).isoformat(),
         'date': today,
     }
     save_state(state)
     print(f'第{episode}話はSMTP受付済み・Blogger公開確認待ち。'
-          '次回も実行可能です。未公開なら同じ話数を再送信します。')
+          '次回も実行可能です。未公開なら保存した同じ本文を再送信します。')
     return True
 
 
