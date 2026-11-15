@@ -143,6 +143,9 @@ def main():
     finally:
         (BASE/'run_summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf-8')
         print('SUMMARY',json.dumps(summary,ensure_ascii=False),flush=True)
+        print(f"RACE_COUNTS predicted={len(summary['predicted'])} held={len(summary['held'])} failed={len(summary['failed'])} discovered={len(ids) if 'ids' in locals() else 0}", flush=True)
+        if not summary['predicted']:
+            print('WARNING: 予想できたレースは0件です。保留理由を記事に記載します。', flush=True)
     # 取得不足でも記事生成へ進める。重大な設定・実行エラーは後段で検知する。
     return 0
 if __name__=='__main__':
