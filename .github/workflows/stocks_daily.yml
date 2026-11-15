@@ -42,4 +42,15 @@ jobs:
             exit 0
           fi
           git commit -m 'Update Japan stocks top 3'
-          git push
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git rebase origin/main
+            if git push origin HEAD:main; then
+              echo "Stock JSON published (attempt ${attempt})."
+              exit 0
+            fi
+            echo "Concurrent update; retry ${attempt}/5"
+            sleep 3
+          done
+          echo 'ERROR: stock data push failed after five attempts.' >&2
+          exit 1
