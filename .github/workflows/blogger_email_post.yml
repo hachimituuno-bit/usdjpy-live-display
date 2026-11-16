@@ -1,67 +1,24 @@
-name: NEW Blogger Mail2Blogger post (JST automatic)
+name: NEW Blogger Mail2Blogger post (preview only; posting disabled)
 
-# Only the NEW usdjpy-live-display repository uses this workflow.
-# No duplicate-title/history checks; each actual run sends ONE NEW email post.
+# Combined FX/stocks articles are disabled. The dashboard remains updated by
+# USDJPY_workflow_fixed.yml and stocks_daily.yml.
+# Manual dispatch prints a preview only; it never sends an email.
 on:
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'true: preview only / false: send one NEW Blogger email post'
-        required: true
-        type: boolean
-        default: false
-  schedule:
-    # GitHub cron below is in UTC; Japanese local time = UTC+9.
-    # JST Monday-Friday 07:12-08:57, every 15 minutes.
-    - cron: '12,27,42,57 22-23 * * 0-4'
-    # JST Monday-Friday 09:12-23:57, every 15 minutes.
-    - cron: '12,27,42,57 0-14 * * 1-5'
-    # JST Tuesday-Saturday 00:12-06:12, once per hour.
-    - cron: '12 15-21 * * 1-5'
-    # JST Saturday 07:00 through Monday 06:59: NO sending.
 
 permissions:
   contents: read
 
 jobs:
-  send-new-post:
+  preview-only:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Checkout NEW repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Preview or email NEW Blogger post (enforce JST window)
+      - name: Preview combined market analysis without sending email
         env:
-          # Scheduled runs send; manual runs now default to actual email sending.
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          BLOGGER_POST_EMAIL: ${{ secrets.BLOGGER_POST_EMAIL }}
-        run: |
-          python - <<'PY'
-          import os
-          import subprocess
-          import sys
-          from datetime import datetime
-          from zoneinfo import ZoneInfo
-
-          now = datetime.now(ZoneInfo('Asia/Tokyo'))
-          weekday, hour = now.weekday(), now.hour  # Monday=0, Sunday=6
-          allowed = ((weekday <= 4 and hour >= 7) or
-                     (1 <= weekday <= 5 and hour < 7))
-          dry_run = os.environ.get('DRY_RUN', 'true').lower() != 'false'
-          print(f'日本時間: {now:%Y-%m-%d %H:%M:%S} / dry_run={dry_run}')
-          if os.environ.get('GITHUB_EVENT_NAME') == 'schedule' and not dry_run and not allowed:
-              print('投稿禁止時間帯のため、メール送信せず終了します。')
-              sys.exit(0)
-          subprocess.run([sys.executable, 'mail_to_blogger.py'], check=True)
-          PY
+          DRY_RUN: 'true'
+        run: python mail_to_blogger.py
