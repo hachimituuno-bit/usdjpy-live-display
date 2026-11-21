@@ -39,7 +39,7 @@ def public_post(day, earliest=None):
                 entries = [entries]
             total = int(feed.get('openSearch$totalResults', {}).get('$t', len(entries)))
             for entry in entries:
-                if entry.get('title', {}).get('$t') != expected_title(day):
+                if ' '.join(entry.get('title', {}).get('$t', '').split()) != ' '.join(expected_title(day).split()):
                     continue
                 if earliest:
                     published = datetime.fromisoformat(entry['published']['$t'].replace('Z', '+00:00'))
@@ -50,6 +50,8 @@ def public_post(day, earliest=None):
                     if (link.get('rel') == 'alternate' and
                             link.get('href', '').startswith('https://hachinosuke7.blogspot.com/')):
                         return link['href'], True
+            if not entries and total > 0:
+                raise RuntimeError('Blogger feed returned an empty page before all posts were checked')
             start += len(entries)
             if start > total:
                 return None, True
@@ -133,9 +135,9 @@ def main():
     due = []
     for day, item in sorted(state.items()):
         status = item.get('status')
-        if status == 'published':
+        if status in ('published', 'manual_required'):
             continue
-        if status not in ('pending', 'failed', 'smtp_accepted', 'awaiting_publication', 'delivery_uncertain'):
+        if status not in ('pending', 'failed', 'smtp_accepted', 'awaiting_publication', 'delivery_uncertain', 'manual_required'):
             continue
         next_at = item.get('next_attempt_utc')
         if next_at and now < datetime.fromisoformat(next_at):
@@ -160,7 +162,7 @@ def main():
             save(state)
             print('Blogger publication VERIFIED:', day, url, flush=True)
             continue
-        if status in ('smtp_accepted', 'awaiting_publication', 'delivery_uncertain'):
+        if status in ('smtp_accepted', 'awaiting_publication', 'delivery_uncertain', 'manual_required'):
             item['status'] = 'awaiting_publication'
             item['next_attempt_utc'] = (now + timedelta(hours=1)).isoformat()
             item['last_error'] = ('Blogger feed unavailable; delivery status unknown' if not verified
@@ -177,9 +179,9 @@ def main():
             failures.append(day + ': ' + item['last_error'])
             continue
         if date.fromisoformat(day) < local.date():
-            item['status'] = 'failed'
-            item['next_attempt_utc'] = (now + timedelta(hours=1)).isoformat()
-            item['last_error'] = 'Race date passed; source program forbids historical prediction. Manual intervention required'
+            item['status'] = 'manual_required'
+            item.pop('next_attempt_utc', None)
+            item['last_error'] = 'Race date passed; historical predictions are unavailable. Manual intervention required'
             save(state)
             failures.append(day + ': ' + item['last_error'])
             continue
