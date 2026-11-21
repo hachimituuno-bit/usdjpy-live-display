@@ -1,9 +1,11 @@
 """Persistent hourly retry gate for weekend race posts (JST).
 
 A successful SMTP send means SMTP accepted the message, NOT that Blogger published it.
-Unknown SMTP outcomes cannot be retried safely without a publication verification API.
+Automatic retries require a successful public-feed check showing no matching post; a failed feed check never authorizes resending.
 """
 import json
+import re
+import unicodedata
 import os
 import subprocess
 import time
@@ -14,6 +16,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 STATE = Path('keiba_new/posting_state.json')
+ARCHIVE = Path('keiba_new/pending_articles')
 JST = ZoneInfo('Asia/Tokyo')
 UTC = timezone.utc
 BLOG_FEED = 'https://hachinosuke7.blogspot.com/feeds/posts/default'
@@ -24,13 +27,21 @@ def expected_title(day):
     return f'【新方式】{d.year}年{d.month}月{d.day}日 中央競馬予想｜馬番一覧・取得状況'
 
 
+def title_matches(actual, day):
+    """Accept Blogger typography changes, but require this exact race date and topic."""
+    def normalize(value):
+        value = unicodedata.normalize('NFKC', value or '')
+        return re.sub(r'[\s\W_]+', '', value, flags=re.UNICODE)
+    return normalize(actual) == normalize(expected_title(day))
+
+
 def public_post(day, earliest=None):
     """Check all available public-feed pages, never infer absence from a partial feed."""
     try:
         start = 1
         while True:
             response = requests.get(BLOG_FEED, params={
-                'alt': 'json', 'max-results': 150, 'start-index': start
+                'alt': 'json', 'max-results': 150, 'start-index': start, '_': int(time.time())
             }, timeout=30)
             response.raise_for_status()
             feed = response.json().get('feed', {})
@@ -39,13 +50,10 @@ def public_post(day, earliest=None):
                 entries = [entries]
             total = int(feed.get('openSearch$totalResults', {}).get('$t', len(entries)))
             for entry in entries:
-                if ' '.join(entry.get('title', {}).get('$t', '').split()) != ' '.join(expected_title(day).split()):
+                if not title_matches(entry.get('title', {}).get('$t', ''), day):
                     continue
-                if earliest:
-                    published = datetime.fromisoformat(entry['published']['$t'].replace('Z', '+00:00'))
-                    cutoff = datetime.fromisoformat(earliest.replace('Z', '+00:00'))
-                    if published.tzinfo is None or published < cutoff - timedelta(minutes=5):
-                        continue
+                # A matching article is published regardless of when its email was sent.
+                # In particular, a manually posted article should stop automatic retries.
                 for link in entry.get('link', []):
                     if (link.get('rel') == 'alternate' and
                             link.get('href', '').startswith('https://hachinosuke7.blogspot.com/')):
@@ -62,7 +70,7 @@ def public_post(day, earliest=None):
         return None, False
 
 
-def persist_pre_send(state):
+def persist_pre_send(state, article=None):
     """Durably push uncertainty marker before attempting SMTP.
 
     Fail closed: do not send if the remote state cannot be confirmed saved.
@@ -75,6 +83,8 @@ def persist_pre_send(state):
     checked('git', 'config', 'user.name', 'github-actions[bot]')
     checked('git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
     checked('git', 'add', '-f', str(STATE))
+    if article is not None:
+        checked('git', 'add', '-f', str(article))
     checked('git', 'commit', '-m', 'Persist keiba delivery uncertainty before SMTP')
     for attempt in range(5):
         result = subprocess.run(['git', 'push', 'origin', 'HEAD:main'], check=False,
@@ -162,15 +172,6 @@ def main():
             save(state)
             print('Blogger publication VERIFIED:', day, url, flush=True)
             continue
-        if status in ('smtp_accepted', 'awaiting_publication', 'delivery_uncertain', 'manual_required'):
-            item['status'] = 'awaiting_publication'
-            item['next_attempt_utc'] = (now + timedelta(hours=1)).isoformat()
-            item['last_error'] = ('Blogger feed unavailable; delivery status unknown' if not verified
-                                  else 'SMTP accepted, but public Blogger post not yet verified')
-            save(state)
-            failures.append(day + ': ' + item['last_error'])
-            print('No automatic resend: SMTP acceptance could already have published the post.', flush=True)
-            continue
         if not verified:
             item['status'] = 'failed'
             item['next_attempt_utc'] = (now + timedelta(hours=1)).isoformat()
@@ -178,37 +179,77 @@ def main():
             save(state)
             failures.append(day + ': ' + item['last_error'])
             continue
-        if date.fromisoformat(day) < local.date():
+        archive = ARCHIVE / (day + '.json')
+        if date.fromisoformat(day) < local.date() and not archive.exists():
+            # Older deployments never saved the article; generating a past-day
+            # prediction would risk publishing made-up or changed information.
             item['status'] = 'manual_required'
             item.pop('next_attempt_utc', None)
-            item['last_error'] = 'Race date passed; historical predictions are unavailable. Manual intervention required'
+            item['last_error'] = 'No archived article for past race date; manual intervention required'
             save(state)
             failures.append(day + ': ' + item['last_error'])
             continue
+        # The feed was reachable and fully paginated with no matching published
+        # article. Retry hourly, including after SMTP acceptance or an uncertain
+        # send outcome. A late Blogger delivery can still cause a duplicate;
+        # the publication check minimizes but cannot eliminate that risk.
+        if status in ('smtp_accepted', 'awaiting_publication', 'delivery_uncertain'):
+            print('PUBLIC POST ABSENT; retrying SMTP for', day, flush=True)
         item['attempts'] = item.get('attempts', 0) + 1
         item['last_attempt_utc'] = now.isoformat()
         item['next_attempt_utc'] = (now + timedelta(hours=1)).isoformat()
         save(state)
-        if run([sys.executable, 'keiba_new/keiba_new_all_races.py', '--date', day]) != 0:
-            item['status'] = 'failed'
-            item['last_error'] = 'Prediction generation failed'
-        elif run([sys.executable, 'keiba_new/keiba_new_blog_post.py']) != 0:
-            item['status'] = 'failed'
-            item['last_error'] = 'Article rendering failed'
+        if archive.exists():
+            try:
+                archived = json.loads(archive.read_text(encoding='utf-8'))
+                if archived.get('title') != expected_title(day) or not isinstance(archived.get('body'), str) or not archived['body'].strip():
+                    raise ValueError('Archived title, date, or body invalid')
+            except (OSError, ValueError, TypeError, AttributeError) as exc:
+                item['status'] = 'failed'
+                item['last_error'] = f'Archived article invalid: {exc}'
+                save(state)
+                failures.append(day + ': ' + item['last_error'])
+                continue
+            print('Reusing saved article for', day, flush=True)
         else:
-            # Mark uncertain BEFORE calling SMTP. A timeout can happen after
-            # the SMTP server has accepted the message.
+            if run([sys.executable, 'keiba_new/keiba_new_all_races.py', '--date', day]) != 0:
+                item['status'] = 'failed'
+                item['last_error'] = 'Prediction generation failed'
+                save(state)
+                failures.append(day + ': ' + item['last_error'])
+                continue
+            if run([sys.executable, 'keiba_new/keiba_new_blog_post.py']) != 0:
+                item['status'] = 'failed'
+                item['last_error'] = 'Article rendering failed'
+                save(state)
+                failures.append(day + ': ' + item['last_error'])
+                continue
+            summary = json.loads(Path('keiba_new_results/run_summary.json').read_text(encoding='utf-8'))
+            if summary.get('date') != day or not summary.get('predicted'):
+                item['status'] = 'failed'
+                item['last_error'] = 'No valid predictions for race date; not publishing a hold-only article'
+                save(state)
+                failures.append(day + ': ' + item['last_error'])
+                continue
+            title = Path('keiba_new_results/blog_article_title.txt').read_text(encoding='utf-8')
+            body = Path('keiba_new_results/blog_article.html').read_text(encoding='utf-8')
+            if title != expected_title(day):
+                raise RuntimeError('Article title/date mismatch; refusing to send')
+            ARCHIVE.mkdir(parents=True, exist_ok=True)
+            archive.write_text(json.dumps({'title': title, 'body': body}, ensure_ascii=False), encoding='utf-8')
+        # Persist article and uncertainty BEFORE SMTP; reruns and subsequent days
+        # reuse the same immutable prediction instead of recomputing it.
+        item['status'] = 'delivery_uncertain'
+        item.setdefault('first_send_utc', datetime.now(UTC).isoformat())
+        persist_pre_send(state, archive)
+        code = run([sys.executable, 'keiba_new/keiba_new_blog_post.py', '--send', '--archived-article', str(archive)])
+        if code == 0:
+            item['status'] = 'awaiting_publication'
+            item['smtp_accepted_utc'] = datetime.now(UTC).isoformat()
+            item['last_error'] = 'SMTP accepted; awaiting public Blogger verification'
+        else:
             item['status'] = 'delivery_uncertain'
-            item.setdefault('first_send_utc', datetime.now(UTC).isoformat())
-            persist_pre_send(state)
-            code = run([sys.executable, 'keiba_new/keiba_new_blog_post.py', '--send'])
-            if code == 0:
-                item['status'] = 'awaiting_publication'
-                item['smtp_accepted_utc'] = datetime.now(UTC).isoformat()
-                item['last_error'] = 'SMTP accepted; awaiting public Blogger verification'
-            else:
-                item['status'] = 'delivery_uncertain'
-                item['last_error'] = 'SMTP command failed; delivery may have occurred; no automatic resend'
+            item['last_error'] = 'SMTP command failed; next retry requires a successful public-feed absence check'
         save(state)
         failures.append(day + ': ' + item.get('last_error', 'Not verified'))
     if failures:

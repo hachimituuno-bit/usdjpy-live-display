@@ -74,8 +74,17 @@ def build(base=BASE):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--send', action='store_true', help='Send only when all SMTP secrets are present')
+    parser.add_argument('--archived-article', help='Previously saved immutable article JSON')
     args = parser.parse_args()
-    title, body = build()
+    if args.archived_article:
+        if not args.send:
+            parser.error('--archived-article requires --send')
+        article = json.loads(Path(args.archived_article).read_text(encoding='utf-8'))
+        title, body = article['title'], article['body']
+        if not isinstance(title, str) or not isinstance(body, str) or not title or not body:
+            raise ValueError('Invalid archived article')
+    else:
+        title, body = build()
     BASE.mkdir(exist_ok=True)
     (BASE / 'blog_article.html').write_text(body, encoding='utf-8')
     (BASE / 'blog_article_title.txt').write_text(title, encoding='utf-8')
