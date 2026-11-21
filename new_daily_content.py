@@ -474,7 +474,9 @@ def publish_story(state, today):
             # mistaken for an unpublished chapter.
             if not str(exc).startswith('小説の公開確認待ち:'):
                 raise
-            print('公開が確認できないため同じ話数を再送信します:', exc)
+            if os.getenv('GITHUB_EVENT_NAME') != 'workflow_dispatch':
+                raise RuntimeError('自動投稿を保留: 公開未確認の話数は二重投稿防止のため再送信しません。') from exc
+            print('手動実行: 公開未確認の同じ話数を明示的に再送信します:', exc)
             pending = state['pending_story_publication']
             if (int(state.get('episode', 0)) != int(pending.get('episode', -1))
                     or int(state.get('series_number', 0)) != int(pending.get('series_number', -1))
