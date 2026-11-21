@@ -1,1 +1,8 @@
-{}
+{
+  "2026-11-21": {
+    "attempts": 1,
+    "last_attempt_utc": "2026-11-21T07:29:07.350398+00:00",
+    "smtp_accepted_utc": "2026-11-21T07:29:51.224483+00:00",
+    "status": "smtp_accepted"
+  }
+}
