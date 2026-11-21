@@ -2,7 +2,9 @@
   "2026-11-21": {
     "attempts": 1,
     "last_attempt_utc": "2026-11-21T07:29:07.350398+00:00",
+    "public_url": "https://hachinosuke7.blogspot.com/2026/11/20261121_01576958514.html",
+    "published_verified_utc": "2026-11-21T15:56:37.646463+00:00",
     "smtp_accepted_utc": "2026-11-21T07:29:51.224483+00:00",
-    "status": "smtp_accepted"
+    "status": "published"
   }
 }
