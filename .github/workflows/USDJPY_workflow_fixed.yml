@@ -84,7 +84,7 @@ jobs:
 
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               output.write(f'run={str(allowed).lower()}\n')
-              output.write(f'weekend_override={str(special_weekend).lower()}\n')
+              output.write(f'weekend_override={str(manual or special_weekend).lower()}\n')
           print('JST:', now.isoformat(timespec='seconds'))
           print('FX:', 'RUN' if allowed else 'SKIP', f'({reason})')
           PY
@@ -104,7 +104,7 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         env:
           # The current fx_generate.py recognizes this existing override.
-          # TRUE only in the one-time 2026 weekend; FALSE during normal operation.
+          # TRUE for manual runs or the one-time 2026 weekend; FALSE for normal scheduled runs.
           WEEKEND_TEST_MODE: ${{ steps.gate.outputs.weekend_override }}
         run: python fx_generate.py
 
