@@ -6,6 +6,7 @@ Unknown SMTP outcomes cannot be retried safely without a publication verificatio
 import json
 import os
 import subprocess
+import time
 import requests
 import sys
 from datetime import datetime, timedelta, timezone, date
@@ -24,35 +25,65 @@ def expected_title(day):
 
 
 def public_post(day, earliest=None):
-    """Find exact published title; return (url, verified_feed).
-
-    A feed outage, truncation or ambiguous result must not trigger a resend.
-    """
+    """Check all available public-feed pages, never infer absence from a partial feed."""
     try:
-        response = requests.get(BLOG_FEED, params={'alt': 'json', 'max-results': 150}, timeout=30)
-        response.raise_for_status()
-        feed = response.json().get('feed', {})
-        entries = feed.get('entry', [])
-        if isinstance(entries, dict):
-            entries = [entries]
-        total = int(feed.get('openSearch$totalResults', {}).get('$t', len(entries)))
-        if total > len(entries):
-            raise RuntimeError('Blogger feed is truncated')
-        for entry in entries:
-            if entry.get('title', {}).get('$t') != expected_title(day):
-                continue
-            if earliest:
-                published = datetime.fromisoformat(entry['published']['$t'].replace('Z', '+00:00'))
-                start = datetime.fromisoformat(earliest.replace('Z', '+00:00'))
-                if published.tzinfo is None or published < start - timedelta(minutes=5):
+        start = 1
+        while True:
+            response = requests.get(BLOG_FEED, params={
+                'alt': 'json', 'max-results': 150, 'start-index': start
+            }, timeout=30)
+            response.raise_for_status()
+            feed = response.json().get('feed', {})
+            entries = feed.get('entry', [])
+            if isinstance(entries, dict):
+                entries = [entries]
+            total = int(feed.get('openSearch$totalResults', {}).get('$t', len(entries)))
+            for entry in entries:
+                if entry.get('title', {}).get('$t') != expected_title(day):
                     continue
-            for link in entry.get('link', []):
-                if link.get('rel') == 'alternate' and link.get('href', '').startswith('https://hachinosuke7.blogspot.com/'):
-                    return link['href'], True
-        return None, True
+                if earliest:
+                    published = datetime.fromisoformat(entry['published']['$t'].replace('Z', '+00:00'))
+                    cutoff = datetime.fromisoformat(earliest.replace('Z', '+00:00'))
+                    if published.tzinfo is None or published < cutoff - timedelta(minutes=5):
+                        continue
+                for link in entry.get('link', []):
+                    if (link.get('rel') == 'alternate' and
+                            link.get('href', '').startswith('https://hachinosuke7.blogspot.com/')):
+                        return link['href'], True
+            start += len(entries)
+            if start > total:
+                return None, True
+            if not entries or start > 10000:
+                raise RuntimeError('Blogger feed incomplete or exceeds safe pagination limit')
     except (requests.RequestException, ValueError, KeyError, TypeError, RuntimeError) as exc:
         print('PUBLICATION CHECK UNAVAILABLE:', type(exc).__name__, str(exc), flush=True)
         return None, False
+
+
+def persist_pre_send(state):
+    """Durably push uncertainty marker before attempting SMTP.
+
+    Fail closed: do not send if the remote state cannot be confirmed saved.
+    """
+    save(state)
+    def checked(*cmd):
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        if result.returncode:
+            raise RuntimeError('Cannot persist pre-send state: ' + ' '.join(cmd) + ': ' + result.stderr[-600:])
+    checked('git', 'config', 'user.name', 'github-actions[bot]')
+    checked('git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+    checked('git', 'add', '-f', str(STATE))
+    checked('git', 'commit', '-m', 'Persist keiba delivery uncertainty before SMTP')
+    for attempt in range(5):
+        result = subprocess.run(['git', 'push', 'origin', 'HEAD:main'], check=False,
+                                capture_output=True, text=True)
+        if result.returncode == 0:
+            print('PRE-SEND STATE DURABLY SAVED', flush=True)
+            return
+        # Never rebase and retry after a failed push here: a conflict could
+        # overwrite someone else's state, and SMTP must not run unprotected.
+        time.sleep(2)
+    raise RuntimeError('Cannot verify remote pre-send state; SMTP deliberately NOT attempted')
 
 
 def load():
@@ -145,6 +176,13 @@ def main():
             save(state)
             failures.append(day + ': ' + item['last_error'])
             continue
+        if date.fromisoformat(day) < local.date():
+            item['status'] = 'failed'
+            item['next_attempt_utc'] = (now + timedelta(hours=1)).isoformat()
+            item['last_error'] = 'Race date passed; source program forbids historical prediction. Manual intervention required'
+            save(state)
+            failures.append(day + ': ' + item['last_error'])
+            continue
         item['attempts'] = item.get('attempts', 0) + 1
         item['last_attempt_utc'] = now.isoformat()
         item['next_attempt_utc'] = (now + timedelta(hours=1)).isoformat()
@@ -160,7 +198,7 @@ def main():
             # the SMTP server has accepted the message.
             item['status'] = 'delivery_uncertain'
             item.setdefault('first_send_utc', datetime.now(UTC).isoformat())
-            save(state)
+            persist_pre_send(state)
             code = run([sys.executable, 'keiba_new/keiba_new_blog_post.py', '--send'])
             if code == 0:
                 item['status'] = 'awaiting_publication'

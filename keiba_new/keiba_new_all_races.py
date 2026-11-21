@@ -76,7 +76,7 @@ def main():
     ap.add_argument('--date',default='',help='YYYY-MM-DD (blank=today JST)')
     ap.add_argument('--delay',type=float,default=1.0)
     a=ap.parse_args();day=date.fromisoformat(a.date) if a.date else datetime.now(JST).date()
-    if day<datetime.now(JST).date():raise ValueError('過去日の新規予想は禁止')
+    if day<datetime.now(JST).date():raise ValueError('過去日の新規予想は禁止。過去日については自動再取得できません')
     BASE.mkdir(exist_ok=True)
     summary={'date':day.isoformat(),'mode':'auto','status':'FAILED','predicted':[],'held':[],'failed':[],'source':'Yahoo!競馬','coefficient':0.5}
     try:
@@ -145,9 +145,9 @@ def main():
         print('SUMMARY',json.dumps(summary,ensure_ascii=False),flush=True)
         print(f"RACE_COUNTS predicted={len(summary['predicted'])} held={len(summary['held'])} failed={len(summary['failed'])} discovered={len(ids) if 'ids' in locals() else 0}", flush=True)
         if not summary['predicted']:
-            print('WARNING: 予想できたレースは0件です。保留理由を記事に記載します。', flush=True)
-    # 取得不足でも記事生成へ進める。重大な設定・実行エラーは後段で検知する。
-    return 0
+            print('ERROR: 予想できたレースは0件です。自動投稿を停止します。', flush=True)
+    # 予想0件は記事を送信せず、次回の再試行に委ねる。
+    return 0 if summary['predicted'] else 1
 if __name__=='__main__':
     try:sys.exit(main())
     except Exception as e:print('ERROR',e,file=sys.stderr);sys.exit(1)
