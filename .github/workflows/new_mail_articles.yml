@@ -90,6 +90,7 @@ jobs:
         shell: bash
         env:
           DRY_RUN: ${{ steps.choose.outputs.dry_run }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CONTENT_STATE_KEY: ${{ secrets.CONTENT_STATE_KEY }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}

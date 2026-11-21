@@ -100,7 +100,6 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Generate fresh USDJPY data
-        continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
         if: steps.gate.outputs.run == 'true'
         env:
           # The current fx_generate.py recognizes this existing override.
