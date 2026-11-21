@@ -42,15 +42,18 @@ def main():
     if requested:
         date.fromisoformat(requested)
     if manual:
+        # A manual dispatch always attempts the requested operation, even if
+        # the same race date was already sent. Do not mutate automatic state.
         day = requested or local.date().isoformat()
-        if not publish:
-            if run([sys.executable, 'keiba_new/keiba_new_all_races.py', '--date', day]) != 0:
-                sys.exit(1)
-            sys.exit(run([sys.executable, 'keiba_new/keiba_new_blog_post.py']))
-        if state.get(day, {}).get('status') == 'smtp_accepted':
-            print('Already accepted by SMTP; refusing duplicate send:', day)
-            return
-        state.setdefault(day, {'status': 'pending'})
+        print('MANUAL: duplicate suppression disabled:', day, flush=True)
+        if run([sys.executable, 'keiba_new/keiba_new_all_races.py', '--date', day]) != 0:
+            sys.exit(1)
+        if run([sys.executable, 'keiba_new/keiba_new_blog_post.py']) != 0:
+            sys.exit(1)
+        if publish:
+            sys.exit(run([sys.executable, 'keiba_new/keiba_new_blog_post.py', '--send']))
+        print('MANUAL PREVIEW: no SMTP send.')
+        return
     else:
         # Saturday/Sunday 01:00 JST starts that day's attempt.
         if local.weekday() in (5, 6) and local.hour >= 1:
