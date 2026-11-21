@@ -501,8 +501,11 @@ def publish_story(state, today):
             print('旧形式の確認待ち記録に本文がないため、同じ話数を一度だけ再生成します。')
         else:
             if confirmed:
-                print('公開済み話数を確定しました。次話は次回の実行で投稿します。')
-                return True
+                if os.getenv('GITHUB_EVENT_NAME') == 'workflow_dispatch':
+                    print('MANUAL: 公開済み話数を確定し、続けて次話を生成・送信します。')
+                else:
+                    print('公開済み話数を確定しました。次話は次回の実行で投稿します。')
+                    return True
     else:
         sync_story_with_public_blogger(state)
     number = int(state.get('series_number', 1))
