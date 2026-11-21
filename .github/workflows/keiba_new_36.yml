@@ -1,8 +1,9 @@
 name: Keiba NEW 36 races (independent)
 on:
-  # Saturday and Sunday 08:30 JST (Friday/Saturday 23:30 UTC)
   schedule:
-    - cron: '30 23 * * 5,6'
+    # Hourly UTC. The Python gate starts new Sat/Sun races at 01:00 JST,
+    # and retries failed attempts hourly until SMTP accepts the message.
+    - cron: '0 * * * *'
   workflow_dispatch:
     inputs:
       date:
@@ -16,7 +17,7 @@ on:
         type: choice
         options: ['false', 'true']
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: keiba-new-all-${{ github.ref }}
   cancel-in-progress: false
@@ -26,26 +27,47 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Dependencies
         run: python -m pip install 'requests>=2.31,<3' 'beautifulsoup4>=4.12,<5'
-      - name: Fetch and score all 36 races (new method 0.5)
+      - name: Run scheduled posting and durable hourly retry
         env:
           RACE_DATE: ${{ inputs.date }}
-        run: python keiba_new/keiba_new_all_races.py --date "$RACE_DATE"
-      - name: Render available races and explain missing results
-        run: python keiba_new/keiba_new_blog_post.py
-      - name: Send available new-method article (scheduled or explicit manual true)
-        if: ${{ github.event_name == 'schedule' || inputs.publish == 'true' }}
-        env:
+          PUBLISH: ${{ inputs.publish }}
+          EVENT_NAME: ${{ github.event_name }}
           BLOGGER_POST_EMAIL: ${{ secrets.BLOGGER_POST_EMAIL }}
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
-        run: python keiba_new/keiba_new_blog_post.py --send
+        run: python keiba_new/keiba_post_retry.py
+      - name: Commit posting state
+        if: ${{ always() }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f keiba_new/posting_state.json
+          if git diff --cached --quiet; then
+            echo 'No state changes.'
+            exit 0
+          fi
+          git commit -m 'Update keiba posting delivery state'
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            if ! git rebase origin/main; then
+              git rebase --abort || true
+              echo 'State conflict; stopping to avoid duplicate sends.' >&2
+              exit 1
+            fi
+            if git push origin HEAD:main; then exit 0; fi
+            sleep 3
+          done
+          echo 'ERROR: state push failed; check before retrying to avoid duplicates.' >&2
+          exit 1
       - name: Upload preview and diagnostic results
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
