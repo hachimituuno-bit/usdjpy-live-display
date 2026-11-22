@@ -13,7 +13,7 @@
     "last_attempt_utc": "2026-11-22T09:32:07.109790+00:00",
     "last_error": "SMTP accepted; awaiting public Blogger verification",
     "next_attempt_utc": "2026-11-22T10:32:07.109790+00:00",
-    "smtp_accepted_utc": "2026-11-22T01:56:21.499565+00:00",
-    "status": "delivery_uncertain"
+    "smtp_accepted_utc": "2026-11-22T09:32:09.581784+00:00",
+    "status": "awaiting_publication"
   }
 }
