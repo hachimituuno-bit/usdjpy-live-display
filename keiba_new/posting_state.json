@@ -8,12 +8,12 @@
     "status": "published"
   },
   "2026-11-22": {
-    "attempts": 2,
+    "attempts": 3,
     "first_send_utc": "2026-11-21T21:33:00.091470+00:00",
-    "last_attempt_utc": "2026-11-22T01:56:16.862418+00:00",
+    "last_attempt_utc": "2026-11-22T09:32:07.109790+00:00",
     "last_error": "SMTP accepted; awaiting public Blogger verification",
-    "next_attempt_utc": "2026-11-22T02:56:16.862418+00:00",
+    "next_attempt_utc": "2026-11-22T10:32:07.109790+00:00",
     "smtp_accepted_utc": "2026-11-22T01:56:21.499565+00:00",
-    "status": "awaiting_publication"
+    "status": "delivery_uncertain"
   }
 }
