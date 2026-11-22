@@ -124,18 +124,18 @@ def main():
     if requested:
         date.fromisoformat(requested)
     if manual:
-        # A manual dispatch always attempts the requested operation, even if
-        # the same race date was already sent. Do not mutate automatic state.
         day = requested or local.date().isoformat()
-        print('MANUAL: duplicate suppression disabled:', day, flush=True)
-        if run([sys.executable, 'keiba_new/keiba_new_all_races.py', '--date', day]) != 0:
-            sys.exit(1)
-        if run([sys.executable, 'keiba_new/keiba_new_blog_post.py']) != 0:
-            sys.exit(1)
-        if publish:
-            sys.exit(run([sys.executable, 'keiba_new/keiba_new_blog_post.py', '--send']))
-        print('MANUAL PREVIEW: no SMTP send.')
-        return
+        if not publish:
+            # Preview never sends email or changes the automatic posting state.
+            if run([sys.executable, 'keiba_new/keiba_new_all_races.py', '--date', day]) != 0:
+                sys.exit(1)
+            if run([sys.executable, 'keiba_new/keiba_new_blog_post.py']) != 0:
+                sys.exit(1)
+            print('MANUAL PREVIEW: no SMTP send.')
+            return
+        # Manual publishing uses the SAME duplicate protection and durable
+        # pre-send state as scheduled publishing. No force-send bypass.
+        state.setdefault(day, {'status': 'pending'})
     else:
         # Saturday/Sunday 01:00 JST starts that day's attempt.
         if local.weekday() in (5, 6) and local.hour >= 1:
@@ -145,12 +145,16 @@ def main():
     due = []
     for day, item in sorted(state.items()):
         status = item.get('status')
-        if status in ('published', 'manual_required'):
+        if status == 'published':
+            continue
+        if status == 'manual_required' and not manual:
             continue
         if status not in ('pending', 'failed', 'smtp_accepted', 'awaiting_publication', 'delivery_uncertain', 'manual_required'):
             continue
         next_at = item.get('next_attempt_utc')
-        if next_at and now < datetime.fromisoformat(next_at):
+        if next_at and now < datetime.fromisoformat(next_at) and not manual:
+            continue
+        if manual and day != (requested or local.date().isoformat()):
             continue
         due.append(day)
     if not due:
@@ -173,11 +177,29 @@ def main():
             print('Blogger publication VERIFIED:', day, url, flush=True)
             continue
         if not verified:
-            item['status'] = 'failed'
+            # A transient feed failure must not erase delivery uncertainty.
+            if status not in ('smtp_accepted', 'awaiting_publication', 'delivery_uncertain'):
+                item['status'] = 'failed'
             item['next_attempt_utc'] = (now + timedelta(hours=1)).isoformat()
             item['last_error'] = 'Blogger feed unavailable; cannot safely send'
             save(state)
             failures.append(day + ': ' + item['last_error'])
+            continue
+        if status in ('smtp_accepted', 'awaiting_publication', 'delivery_uncertain') or item.get('first_send_utc') or item.get('smtp_accepted_utc'):
+            # SMTP acceptance is not publication. Never automatically (or
+            # manually) resend an email whose delivery outcome is uncertain.
+            # Check the public feed again on the next scheduled run instead.
+            item['status'] = 'awaiting_publication' if status in ('smtp_accepted', 'awaiting_publication') else 'delivery_uncertain'
+            item['next_attempt_utc'] = (now + timedelta(hours=1)).isoformat()
+            item['last_error'] = 'Previous SMTP delivery may have succeeded; awaiting Blogger publication; no resend'
+            save(state)
+            print('PUBLIC POST ABSENT; SMTP resend BLOCKED for', day, flush=True)
+            failures.append(day + ': ' + item['last_error'])
+            continue
+        if status == 'published':
+            # Previously verified publication must not be sent again even if
+            # the feed temporarily stops listing it.
+            print('ALREADY PUBLISHED; SMTP resend BLOCKED for', day, flush=True)
             continue
         archive = ARCHIVE / (day + '.json')
         if date.fromisoformat(day) < local.date() and not archive.exists():
@@ -189,12 +211,8 @@ def main():
             save(state)
             failures.append(day + ': ' + item['last_error'])
             continue
-        # The feed was reachable and fully paginated with no matching published
-        # article. Retry hourly, including after SMTP acceptance or an uncertain
-        # send outcome. A late Blogger delivery can still cause a duplicate;
-        # the publication check minimizes but cannot eliminate that risk.
-        if status in ('smtp_accepted', 'awaiting_publication', 'delivery_uncertain'):
-            print('PUBLIC POST ABSENT; retrying SMTP for', day, flush=True)
+        # Only an as-yet-unsent date may reach SMTP. Generation failures may
+        # retry, but once a send is attempted the date becomes uncertain.
         item['attempts'] = item.get('attempts', 0) + 1
         item['last_attempt_utc'] = now.isoformat()
         item['next_attempt_utc'] = (now + timedelta(hours=1)).isoformat()
@@ -249,7 +267,7 @@ def main():
             item['last_error'] = 'SMTP accepted; awaiting public Blogger verification'
         else:
             item['status'] = 'delivery_uncertain'
-            item['last_error'] = 'SMTP command failed; next retry requires a successful public-feed absence check'
+            item['last_error'] = 'SMTP command failed; delivery outcome uncertain; no automatic resend'
         save(state)
         failures.append(day + ': ' + item.get('last_error', 'Not verified'))
     if failures:
