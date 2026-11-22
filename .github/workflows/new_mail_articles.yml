@@ -19,9 +19,9 @@ on:
         default: false
   schedule:
     # GitHub cron uses UTC. Schedules may be delayed or skipped.
-    - cron: '7 3 * * *'    # 雑学 12:07 JST every day
-    - cron: '7 10 * * *'   # 小説 19:07 JST every day
-    - cron: '17 23 * * *'  # AI副業 08:17 JST every day (previous UTC day)
+    - cron: '0 12 * * 0-4'  # AI 21:00 JST Sun-Thu (Fri/Sat off)
+    - cron: '0 13 * * 0-4'  # 雑学 22:00 JST Sun-Thu (Fri/Sat off)
+    - cron: '0 14 * * 0-4'  # 小説 23:00 JST Sun-Thu (Fri/Sat off)
 
 permissions:
   contents: write
@@ -57,9 +57,9 @@ jobs:
             echo 'enabled=true' >> "$GITHUB_OUTPUT"
           else
             case "$CRON" in
-              '7 3 * * *') TARGET=trivia;;
-              '7 10 * * *') TARGET=story;;
-              '17 23 * * *') TARGET=ai;;
+              '0 12 * * 0-4') TARGET=ai;;
+              '0 13 * * 0-4') TARGET=trivia;;
+              '0 14 * * 0-4') TARGET=story;;
               *) echo "Unknown schedule: $CRON"; exit 1;;
             esac
             echo "target=$TARGET" >> "$GITHUB_OUTPUT"
